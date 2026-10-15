@@ -1,0 +1,21 @@
+{
+  "name": "@slopwatch/spike-bun-surfaces",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test",
+    "proof": "bun run src/proof.ts",
+    "compile": "bun build --compile --outfile=dist/proof src/proof.ts",
+    "pg:up": "docker run --rm -d --name slopwatch-spike-pg -p 55432:5432 -e POSTGRES_USER=spike -e POSTGRES_PASSWORD=spike -e POSTGRES_DB=spike postgres:17-alpine",
+    "pg:down": "docker rm -f slopwatch-spike-pg"
+  },
+  "dependencies": {
+    "@napi-rs/keyring": "2.1.1",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
+  }
+}
