@@ -26,18 +26,18 @@ Migrations run on startup, tracked in `schema_migrations`.
 The dashboard is HTML at `/`; the JSON API lives under `/api`. Ingestion and the
 admin API are authenticated with `Authorization: Bearer …`.
 
-| Method | Path                                   | Purpose                                               |
-| ------ | -------------------------------------- | ----------------------------------------------------- |
-| `GET`  | `/api/health`                          | Liveness.                                             |
-| `POST` | `/api/admin/users`                     | Add a User, mint their token once (admin token).      |
-| `GET`  | `/api/admin/users`                     | List Users with their identity fields (admin token).  |
-| `POST` | `/api/admin/users/:id/revoke`          | Revoke a User's token (admin).                        |
-| `POST` | `/api/events`                          | Ingest a batch of `NormalEvent`s; `202`.              |
-| `GET`  | `/api/sessions`                        | List Sessions with owner, Turn count, and cost.       |
-| `GET`  | `/api/sessions/:id`                    | One Session with its Turns, child Sessions, and cost. |
-| `GET`  | `/api/sessions/:id/events?since_seq=N` | Events with sequence greater than `N`.                |
-| `GET`  | `/`                                    | Dashboard: the Sessions table.                        |
-| `GET`  | `/sessions/:id`                        | Dashboard: one Session's Turn tree and Subagents.     |
+| Method | Path                                   | Purpose                                                         |
+| ------ | -------------------------------------- | --------------------------------------------------------------- |
+| `GET`  | `/api/health`                          | Liveness.                                                       |
+| `POST` | `/api/admin/users`                     | Add a User, mint their token once (admin token).                |
+| `GET`  | `/api/admin/users`                     | List Users with their identity fields (admin token).            |
+| `POST` | `/api/admin/users/:id/revoke`          | Revoke a User's token (admin).                                  |
+| `POST` | `/api/events`                          | Ingest a batch of `NormalEvent`s; `202`.                        |
+| `GET`  | `/api/sessions`                        | List Sessions with owner, Turn count, and cost.                 |
+| `GET`  | `/api/sessions/:id`                    | One Session with its Turns, child Sessions, and cost.           |
+| `GET`  | `/api/sessions/:id/events?since_seq=N` | Events with sequence greater than `N`.                          |
+| `GET`  | `/`                                    | Dashboard: the Sessions table.                                  |
+| `GET`  | `/sessions/:id`                        | Dashboard: one Session's Turn tree, live Events, and Subagents. |
 
 The admin plane requires the `Authorization: Bearer …` admin token. Creating a
 User returns their token exactly once; the Server stores only its hash, so the
@@ -46,6 +46,13 @@ attempt.
 
 Ingestion attributes every Event to the token's User, dedupes retries by Event
 id, and assigns a per-Session monotonic `event_seq`.
+
+A manager or DRI follows a Session live without refetching it: the Session page
+appends Events by polling `GET /api/sessions/:id/events?since_seq=N` every ~5s and
+on tab focus. `N` starts at the Session's sequence when the page loaded, so each
+poll returns only the increment. The `events` query is unauthenticated (like the
+rest of the read surface) and does not lock the Session, so a Session still being
+written to keeps advancing the view.
 
 A Subagent is a Session whose `parent_session_id` names its spawning Session and
 whose `spawned_by_turn_id` names the Turn that launched it. The parent's detail
