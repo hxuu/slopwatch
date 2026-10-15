@@ -126,7 +126,8 @@ export async function startTestServer(): Promise<TestServer> {
       const client = new Client({ connectionString: databaseUrl });
       await client.connect();
       await client.query(
-        "truncate users, tokens, sessions, turns, events cascade",
+        "truncate users, tokens, sessions, turns, events, model_requests, " +
+          "user_daily_rollup, user_hourly_rollup cascade",
       );
       await client.end();
     },

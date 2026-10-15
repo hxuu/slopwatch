@@ -2,6 +2,7 @@ import type { NormalEvent, SessionStartedEvent } from "@slopwatch/events";
 import { Pool, type PoolClient } from "pg";
 import { hashToken, mintToken } from "./auth";
 import { migrations } from "./migrations";
+import { recomputeRollups } from "./rollups";
 
 /** A person with an identity in one Slopwatch organization. */
 export interface User {
@@ -249,6 +250,7 @@ async function storeBatchInTransaction(
   }
 
   let accepted = 0;
+  const applied: NormalEvent[] = [];
   for (const event of events) {
     const seq = (nextSeq.get(event.sessionId) ?? 0) + 1;
     const inserted = await client.query(
@@ -274,6 +276,7 @@ async function storeBatchInTransaction(
     nextSeq.set(event.sessionId, seq);
     accepted += 1;
     await applyEvent(client, event, seq);
+    applied.push(event);
   }
 
   for (const [sessionId, seq] of nextSeq) {
@@ -282,6 +285,10 @@ async function storeBatchInTransaction(
       seq,
     ]);
   }
+
+  // A newly persisted Model request changes the day and hour it landed in, so
+  // rebuild just those rollup buckets from `model_requests`.
+  await recomputeRollups(client, userId, applied);
 
   return accepted;
 }
