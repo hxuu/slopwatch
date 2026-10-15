@@ -8,6 +8,22 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: slopwatch
+          POSTGRES_PASSWORD: slopwatch
+          POSTGRES_DB: slopwatch
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      SLOPWATCH_TEST_DATABASE_URL: postgres://slopwatch:slopwatch@127.0.0.1:55433/slopwatch
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2

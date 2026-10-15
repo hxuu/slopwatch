@@ -1,0 +1,256 @@
+import type { NormalEvent } from "@slopwatch/events";
+import type { Pool } from "pg";
+import { tokensMatch } from "./auth";
+import { renderSessionDetail, renderSessionList } from "./dashboard";
+import * as db from "./db";
+import { createPool, migrate } from "./db";
+import { isNormalEvent } from "./validate";
+
+export interface ServerOptions {
+  /** The Postgres URL the Server reads and writes. */
+  databaseUrl: string;
+  /** Bearer token the admin API requires. Admin endpoints are off without it. */
+  adminToken?: string;
+  /** TCP port; 0 binds an ephemeral port (tests). Defaults to 3000. */
+  port?: number;
+}
+
+export interface ServerHandle {
+  /** The origin the Server is listening on, e.g. `http://localhost:3000`. */
+  readonly url: string;
+  /** Stop accepting requests and close the pool. */
+  stop(): Promise<void>;
+}
+
+/** Boot the Server: apply migrations, then serve HTTP. */
+export async function startServer(
+  options: ServerOptions,
+): Promise<ServerHandle> {
+  const pool = createPool(options.databaseUrl);
+
+  let server: ReturnType<typeof Bun.serve>;
+  try {
+    await migrate(pool);
+    server = Bun.serve({
+      port: options.port ?? 3000,
+      fetch: (request) => route(request, pool, options.adminToken),
+    });
+  } catch (error) {
+    await pool.end();
+    throw error;
+  }
+
+  return {
+    url: `http://localhost:${server.port}`,
+    async stop() {
+      await server.stop(true);
+      await pool.end();
+    },
+  };
+}
+
+async function route(
+  request: Request,
+  pool: Pool,
+  adminToken: string | undefined,
+): Promise<Response> {
+  const url = new URL(request.url);
+  const { pathname } = url;
+
+  try {
+    if (request.method === "GET" && pathname === "/api/health") {
+      return await health(pool);
+    }
+
+    if (request.method === "POST" && pathname === "/api/admin/users") {
+      return await addUser(request, pool, adminToken);
+    }
+
+    if (request.method === "POST" && pathname === "/api/events") {
+      return await ingest(request, pool);
+    }
+
+    if (request.method === "GET" && pathname === "/api/sessions") {
+      return Response.json(await db.listSessions(pool));
+    }
+
+    const eventsMatch = /^\/api\/sessions\/([^/]+)\/events$/.exec(pathname);
+    if (request.method === "GET" && eventsMatch) {
+      return await readEvents(pool, decodeURIComponent(eventsMatch[1]), url);
+    }
+
+    const sessionMatch = /^\/api\/sessions\/([^/]+)$/.exec(pathname);
+    if (request.method === "GET" && sessionMatch) {
+      return await readSession(pool, decodeURIComponent(sessionMatch[1]));
+    }
+
+    if (request.method === "GET" && pathname === "/") {
+      return html(renderSessionList(await db.listSessions(pool)));
+    }
+
+    const sessionPageMatch = /^\/sessions\/([^/]+)$/.exec(pathname);
+    if (request.method === "GET" && sessionPageMatch) {
+      const session = await db.getSession(
+        pool,
+        decodeURIComponent(sessionPageMatch[1]),
+      );
+      if (!session) return new Response("session not found", { status: 404 });
+      return html(renderSessionDetail(session));
+    }
+  } catch (error) {
+    console.error("[server] unhandled request error", error);
+    return new Response("internal server error", { status: 500 });
+  }
+
+  return new Response("not found", { status: 404 });
+}
+
+/** `POST /api/admin/users`: add a User and mint their token, shown once. */
+async function addUser(
+  request: Request,
+  pool: Pool,
+  adminToken: string | undefined,
+): Promise<Response> {
+  if (!adminToken) {
+    return new Response("admin API is disabled: set SLOPWATCH_ADMIN_TOKEN", {
+      status: 503,
+    });
+  }
+  const presented = bearerToken(request);
+  if (!presented || !tokensMatch(presented, adminToken)) {
+    return unauthorized();
+  }
+
+  const body = await readJson(request);
+  if (body instanceof Response) return body;
+  const { name, email } = (body ?? {}) as { name?: unknown; email?: unknown };
+  if (!isNonBlankString(name) || !isNonBlankString(email)) {
+    return badRequest("`name` and `email` are required");
+  }
+
+  try {
+    const user = await db.createUser(pool, name, email);
+    const token = await db.issueToken(pool, user.id);
+    return Response.json({ ...user, token }, { status: 201 });
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      return new Response("a User with that email already exists", {
+        status: 409,
+      });
+    }
+    throw error;
+  }
+}
+
+/**
+ * `POST /api/events`: persist a batch of Events for the token's User. The User
+ * comes from the token, never from the request body.
+ */
+async function ingest(request: Request, pool: Pool): Promise<Response> {
+  const token = bearerToken(request);
+  if (!token) return unauthorized();
+  const user = await db.findUserByToken(pool, token);
+  if (!user) return unauthorized();
+
+  const body = await readJson(request);
+  if (body instanceof Response) return body;
+  const events = (body as { events?: unknown } | null)?.events;
+  if (!Array.isArray(events)) return badRequest("`events` must be an array");
+  for (const event of events) {
+    if (!isNormalEvent(event)) {
+      return badRequest("one or more Events do not match the schema");
+    }
+  }
+
+  try {
+    const accepted = await db.storeBatch(
+      pool,
+      user.id,
+      events as NormalEvent[],
+    );
+    return Response.json({ accepted }, { status: 202 });
+  } catch (error) {
+    if (error instanceof db.SessionOwnershipError) {
+      return new Response(error.message, { status: 403 });
+    }
+    throw error;
+  }
+}
+
+/** `GET /api/sessions/:id/events?since_seq=N`: the incremental-poll contract. */
+async function readEvents(
+  pool: Pool,
+  sessionId: string,
+  url: URL,
+): Promise<Response> {
+  const sinceSeq = Number(url.searchParams.get("since_seq") ?? "0");
+  if (!Number.isInteger(sinceSeq) || sinceSeq < 0) {
+    return badRequest("`since_seq` must be a non-negative integer");
+  }
+  if (!(await db.sessionExists(pool, sessionId))) {
+    return new Response("session not found", { status: 404 });
+  }
+  return Response.json({
+    events: await db.listEventsSince(pool, sessionId, sinceSeq),
+  });
+}
+
+/** `GET /api/sessions/:id`: one Session with its Turns. */
+async function readSession(pool: Pool, sessionId: string): Promise<Response> {
+  const session = await db.getSession(pool, sessionId);
+  if (!session) return new Response("session not found", { status: 404 });
+  return Response.json(session);
+}
+
+/** `GET /api/health`: liveness, and a real round-trip to Postgres. */
+async function health(pool: Pool): Promise<Response> {
+  try {
+    await pool.query("select 1");
+    return Response.json({ status: "ok" });
+  } catch (error) {
+    console.error("[server] health check failed", error);
+    return Response.json({ status: "unavailable" }, { status: 503 });
+  }
+}
+
+function bearerToken(request: Request): string | null {
+  const header = request.headers.get("authorization");
+  if (!header) return null;
+  const match = /^Bearer (.+)$/i.exec(header);
+  return match ? match[1] : null;
+}
+
+/** Parse a JSON body, or return the 400 response to send back. */
+async function readJson(request: Request): Promise<unknown | Response> {
+  try {
+    return await request.json();
+  } catch {
+    return badRequest("expected a JSON body");
+  }
+}
+
+function unauthorized(): Response {
+  return new Response("unauthorized", { status: 401 });
+}
+
+function html(body: string): Response {
+  return new Response(body, {
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+}
+
+function badRequest(message: string): Response {
+  return new Response(message, { status: 400 });
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: string }).code === "23505"
+  );
+}
+
+function isNonBlankString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
