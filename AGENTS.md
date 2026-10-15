@@ -2,11 +2,11 @@
 
 ### Issue tracker
 
-Issues and specs are local markdown under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
+Issues and specs live as GitHub issues on `hxuu/slopwatch`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-The five canonical triage roles, with default label strings recorded as a `Status:` line in each issue file. See `docs/agents/triage-labels.md`.
+The five canonical triage roles, with default label strings. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 

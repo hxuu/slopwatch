@@ -4,7 +4,7 @@ Status: ready-for-agent
 
 ## Problem Statement
 
-An engineering org runs coding agents (Claude Code, and later Codex CLI, Pi, OpenCode, Copilot CLI) across its developers. Today that work is invisible.
+An engineering org runs coding agents (OpenCode, and later Claude Code, Codex CLI, Pi, Copilot CLI) across its developers. Today that work is invisible.
 
 The org cannot answer basic questions. Which coding agent Sessions ran today? What did they cost? Who is spending the most, on what model, on what work? What is happening right now, in a Session someone is watching live? Which Turn in a Session burned most of the money? When a coding agent was spawned as a Subagent, how did it behave?
 
@@ -101,15 +101,15 @@ Three existing workspaces, all currently stubs:
 
 - **`@slopwatch/events`** gains the real `NormalEvent` schema and the typed Listener to Server client. This is the shared contract and is the one piece both the Server and every Listener depend on.
 - **`@slopwatch/server`** gains the HTTP API, the Postgres schema and migrations, and the dashboard.
-- **`@slopwatch/listener-claude-code`** gains the first real Listener.
+- **`@slopwatch/listener-opencode`** gains the first real Listener. The placeholder Listener workspace is replaced rather than kept alongside a new one; the other coding agents are deferred, so a stub for one of them is dead weight.
 
-ADR-0001 fixes the runtime for all three: Bun for development, tests, and shipping. That ADR's own consequence clause requires validating the `pg` client, file-watching, and local IPC on Bun before significant code is written against them. This spec treats that validation as the first unit of work.
+ADR-0001 fixes the runtime for all three: Bun for development, tests, and shipping. That ADR's own consequence clause requires validating four Bun surfaces before significant code is written against them. With OpenCode as the only Listener, this spec depends on two of the four: the `pg` client and OS keychain access. File-watching and local IPC are not touched, because the OpenCode Listener is an in-process plugin that neither tails a file nor opens a local socket. Those two surfaces defer with the Codex and Copilot Listeners. Validating the two in use is the first unit of work, and a failure there reopens the ADR rather than being worked around.
 
 ### Event schema
 
 `NormalEvent` becomes a discriminated union on a `kind` field, replacing the current `{ kind: "stub" }` placeholder. The categories come from the ingestion research and are carried as distinct variants: Session lifecycle, Turn, Message, Tool event, Model request, and raw-payload retention.
 
-The schema carries a coding agent identifier and coding agent version on every Event, because schema drift is a certainty for Claude Code and Copilot. The raw original payload is retained on the Event rather than discarded, so normalization bugs can be diagnosed and, in principle, replayed.
+The schema carries a coding agent identifier and coding agent version on every Event, because schema drift is a certainty rather than a risk. The raw original payload is retained on the Event rather than discarded, so normalization bugs can be diagnosed and, in principle, replayed.
 
 The typed client exposes a batched ship operation. The existing `sendEvents` export is the seam to build on; it currently throws.
 
@@ -150,13 +150,15 @@ Rollups: `user_hourly_rollup` and `user_daily_rollup`. **This spec commits to th
 
 The dashboard surfaces, in v1: a Live Sessions table, a Session detail view with the Turn DAG, a Developer leaderboard, and a spend-by-agent breakdown. The leaderboard follows the design in `research/developer-leaderboard-design.md`: sorted by today's spend descending, dense and balanced and sparse densities, tabular numerals, mono identifiers.
 
-### Claude Code Listener
+### OpenCode Listener
 
-The first Listener. Capture surface is JSONL tailing of the on-disk transcript, with the coding agent's hooks as lifecycle triggers. Hooks alone are insufficient because they do not carry full message content; the JSONL is mandatory and the hooks only start and stop the Listener.
+The first Listener. The capture surface is OpenCode's first-class plugin API: an in-process TypeScript plugin loaded into OpenCode itself, subscribing to session, message, and tool-execution events and shipping normalized Events directly to the Server. There is no subprocess and no read of on-disk state.
 
-The Listener is a per-Session subprocess, launched by the `SessionStart` hook, terminated on `SessionEnd`. It is not a daemon, so there is no "the developer forgot to start it" failure mode.
+That last point is not a preference. OpenCode's on-disk storage is migrating from JSON files to SQLite, which breaks any file tailer. The plugin API is the stable contract, and it is also the richer one: tool-execution hooks can be observed before and after the fact, and model requests are visible at the parameters level.
 
-Claude Code's transcript schema is undocumented. The Listener therefore detects schema shape and fails loudly on an unrecognized version rather than silently dropping Turns.
+The plugin runs inside OpenCode's own JavaScript runtime and is loaded by OpenCode's lifecycle, so there is no always-on daemon and no "the developer forgot to start it" failure mode. Because it shares a runtime with the coding agent, a Listener defect risks destabilising the developer's coding agent in a way a separate process would not. The plugin therefore does no work on the agent's critical path and never throws into the host.
+
+OpenCode's schema has changed shape several times. The Listener detects unrecognized event shapes and fails loudly rather than silently dropping Turns.
 
 ### Offline behaviour
 
@@ -187,7 +189,7 @@ Through the single seam:
 - **Session and Turn shape.** A Session with Turns and Model requests round-trips; a branching Session round-trips as a DAG; a Subagent round-trips as a child Session linked to its spawning Turn.
 - **Rollups.** The leaderboard endpoint returns spend, counts, top coding agent, 24 hourly points, and 7-day delta consistent with the Model requests ingested.
 - **Admin.** Token mint, token revoke, and the resulting authorization change.
-- **Claude Code Listener, through this same seam.** Recorded Claude Code JSONL fixtures are fed to the Listener, which POSTs to the real Server; assertions are made against the API. This keeps the seam count at one: normalization is verified by what lands in the Server, not by inspecting the Listener's internals. Fixtures include a recognized schema and an unrecognized one, the latter asserting a loud failure rather than silent data loss.
+- **OpenCode Listener, through this same seam.** Recorded OpenCode plugin events are replayed into the Listener, which POSTs to the real Server; assertions are made against the API. This keeps the seam count at one: normalization is verified by what lands in the Server, not by inspecting the Listener's internals. Fixtures include recorded events and an unrecognized event shape, the latter asserting a loud failure rather than silent data loss.
 
 ### Prior art
 
@@ -196,7 +198,7 @@ There is none yet. `apps/server/src/index.test.ts` and `packages/events/src/inde
 ## Out of Scope
 
 - **The DRI review model.** The architecture document records that the design interview exited before resolving whether a DRI is a queryer over a firehose or a recipient of routed Sessions. That choice changes the schema materially (review comments, review state, routing), so it is deferred rather than guessed. The leaderboard and Session views are read-only in v1.
-- **The other four Listeners.** Codex CLI, Pi, OpenCode, and Copilot CLI are the same spine, requiring one Listener each against the shared `NormalEvent` contract. Each is follow-on work, not a separate design. OpenCode and Pi are in-process extensions with no subprocess; Codex and Copilot are JSONL-and-hooks like Claude Code.
+- **The other four Listeners.** Claude Code, Codex CLI, Pi, and Copilot CLI are the same spine, requiring one Listener each against the shared `NormalEvent` contract. Each is follow-on work, not a separate design. Pi is another in-process extension; Claude Code, Codex, and Copilot are transcript-and-hooks captures, which is what brings file-watching and local IPC back onto the list of Bun surfaces to validate.
 - **Resumes.** Coding agent resume and compaction-continue semantics are explicitly deferred by the architecture document until v1 is running on real data.
 - **OIDC.** Admin-minted bearer tokens only.
 - **Retention and pruning.** No TTL, no archival, no per-team policy.
@@ -205,11 +207,11 @@ There is none yet. `apps/server/src/index.test.ts` and `packages/events/src/inde
 - **Push notifications.** No email, no Slack. Notifications are pull-only.
 - **Multi-team scoping and a first-class `Team` entity.** Team is a plain field on a User in v1, as the leaderboard design concedes.
 - **Cost normalization across providers.** Token-to-dollar normalization for cached and reasoning tokens is its own project; v1 stores what the agent reports.
-- **Advancing the `npm`/`npx` install flow beyond the minimum needed to wire up the Claude Code Listener.**
+- **Advancing the install flow beyond the minimum needed to wire up the OpenCode Listener.**
 
 ## Further Notes
 
 - **Two decisions here fill gaps the architecture document left open**: the server-rendered dashboard, and the rollup tables. Both are recorded as decisions above rather than left implicit. Neither contradicts an ADR.
-- **ADR-0001 is load-bearing for this spec.** Its consequence clause names four Bun surfaces to validate before significant code is written: the `pg` client, file-watching, local IPC, and OS keychain access. This spec depends on the first three immediately (Postgres, Claude Code JSONL tailing, the hook-launched Listener) and the fourth at login. Validating them is the first unit of work, and a failure there reopens the ADR rather than being worked around.
+- **ADR-0001 is load-bearing for this spec.** Its consequence clause names four Bun surfaces to validate before significant code is written: the `pg` client, file-watching, local IPC, and OS keychain access. With OpenCode as the only Listener this spec touches two of them, the `pg` client and OS keychain access, and the other two are deferred rather than validated speculatively. Validating the two in use is the first unit of work, and a failure there reopens the ADR rather than being worked around.
 - **The three research documents contain superseded decisions.** `research/v1-architecture-decisions.md` notes that it uses "sidecar" and "backend" for what `CONTEXT.md` now calls Listener and Server. Treat the glossary as authoritative.
 - **The live-spectate latency was deliberately downgraded** from ~100ms fs-watch to 5s polling. The ingestion research still describes the ~100ms fs-watch figure as acceptable. For the Server-facing contract, the 5s polling decision wins; for the Listener's local tailing, lower latency is harmless and not a contract.
