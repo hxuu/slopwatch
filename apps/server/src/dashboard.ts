@@ -1,4 +1,4 @@
-import type { SessionDetail, SessionSummary } from "./db";
+import type { SessionDetail, SessionSummary, Turn } from "./db";
 
 /** The dashboard's Sessions index: every Session, newest first. */
 export function renderSessionList(sessions: SessionSummary[]): string {
@@ -30,20 +30,11 @@ export function renderSessionList(sessions: SessionSummary[]): string {
   return page("Sessions", `<h1>Sessions</h1>${body}`);
 }
 
-/** The dashboard's Session detail: one Session's Turns, prompt and response. */
+/** The dashboard's Session detail: one Session's Turns as a tree, prompt and response. */
 export function renderSessionDetail(session: SessionDetail): string {
-  const turns = session.turns
-    .map(
-      (turn) => `
-      <article class="turn">
-        <h3><code>${escapeHtml(turn.id)}</code></h3>
-        <h4>Prompt</h4>
-        <pre class="prompt">${escapeHtml(turn.prompt ?? "")}</pre>
-        <h4>Response</h4>
-        <pre class="response">${escapeHtml(turn.response ?? "")}</pre>
-      </article>`,
-    )
-    .join("");
+  const turns = session.turns.length
+    ? renderTurnForest(session.turns)
+    : `<p class="empty">No Turns yet.</p>`;
 
   const body = `
     <p><a href="/">&larr; All Sessions</a></p>
@@ -56,9 +47,54 @@ export function renderSessionDetail(session: SessionDetail): string {
       <dt>Ended</dt><dd>${escapeHtml(session.endedAt ?? "still active")}</dd>
     </dl>
     <h2>Turns</h2>
-    ${turns || `<p class="empty">No Turns yet.</p>`}`;
+    ${turns}`;
 
   return page(escapeHtml(session.id), body);
+}
+
+/**
+ * Render a Session's Turns as a tree. Turns arrive in Session order, each naming
+ * its parent, so the View rebuilds the DAG the Listener shipped rather than
+ * flattening it; a linear Session falls out as a straight chain for free.
+ */
+function renderTurnForest(turns: Turn[]): string {
+  const byId = new Map(turns.map((turn) => [turn.id, turn]));
+  const children = new Map<string | null, Turn[]>();
+  for (const turn of turns) {
+    const parent = parentOf(turn, byId);
+    const siblings = children.get(parent) ?? [];
+    siblings.push(turn);
+    children.set(parent, siblings);
+  }
+
+  function renderList(list: Turn[]): string {
+    return `<ol class="turns">${list.map(renderNode).join("")}</ol>`;
+  }
+
+  function renderNode(turn: Turn): string {
+    const nested = children.get(turn.id) ?? [];
+    return `
+      <li class="turn" data-turn-id="${escapeHtml(turn.id)}" data-parent-turn-id="${escapeHtml(turn.parentTurnId ?? "")}">
+        <h3><code>${escapeHtml(turn.id)}</code></h3>
+        <h4>Prompt</h4>
+        <pre class="prompt">${escapeHtml(turn.prompt ?? "")}</pre>
+        <h4>Response</h4>
+        <pre class="response">${escapeHtml(turn.response ?? "")}</pre>
+        ${nested.length ? renderList(nested) : ""}
+      </li>`;
+  }
+
+  return renderList(children.get(null) ?? []);
+}
+
+/**
+ * The parent Turn a Turn nests under, or null when it is a root. A reference to
+ * a Turn outside this Session is a root rather than a dropped Turn.
+ */
+function parentOf(turn: Turn, byId: Map<string, Turn>): string | null {
+  const parent = turn.parentTurnId;
+  if (!parent || parent === turn.id || !byId.has(parent)) return null;
+  return parent;
 }
 
 function page(title: string, body: string): string {
@@ -80,6 +116,8 @@ function page(title: string, body: string): string {
       .active { color: #1a7f37; }
       .ended { color: #8250df; }
       .turn { border: 1px solid #8884; border-radius: 8px; padding: 0.5rem 1rem 1rem; margin-bottom: 1rem; }
+      ol.turns { list-style: none; margin: 0; padding-left: 0; }
+      ol.turns ol.turns { margin-top: 0.75rem; padding-left: 1rem; border-left: 2px solid #8884; }
       h4 { margin: 0.6rem 0 0.3rem; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.7; }
     </style>
   </head>

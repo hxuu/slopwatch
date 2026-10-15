@@ -85,6 +85,53 @@ describeServer("reading a Session back", (server) => {
     expect(detail.turns[1].prompt).toBe("add a test for it");
   });
 
+  test("a branching Session round-trips through the API with its structure intact", async () => {
+    const sessionId = randomUUID();
+    const root = randomUUID();
+    const firstBranch = randomUUID();
+    const secondBranch = randomUUID();
+    await ship([
+      sessionStarted({ sessionId }),
+      turnStarted({ sessionId, turnId: root, prompt: "explain the schema" }),
+      turnEnded({ sessionId, turnId: root, response: "Here is the schema." }),
+      turnStarted({
+        sessionId,
+        turnId: firstBranch,
+        parentTurnId: root,
+        prompt: "what about the events table",
+      }),
+      turnEnded({
+        sessionId,
+        turnId: firstBranch,
+        response: "It is append-only.",
+      }),
+      turnStarted({
+        sessionId,
+        turnId: secondBranch,
+        parentTurnId: root,
+        prompt: "and the rollups",
+      }),
+      turnEnded({
+        sessionId,
+        turnId: secondBranch,
+        response: "They are a cache.",
+      }),
+    ]);
+
+    const detail = (await (
+      await fetch(`${server().url}/api/sessions/${sessionId}`)
+    ).json()) as {
+      turns: Array<{ id: string; parentTurnId: string | null }>;
+    };
+
+    const parentOf = new Map(
+      detail.turns.map((turn) => [turn.id, turn.parentTurnId]),
+    );
+    expect(parentOf.get(root)).toBeNull();
+    expect(parentOf.get(firstBranch)).toBe(root);
+    expect(parentOf.get(secondBranch)).toBe(root);
+  });
+
   test("since_seq returns exactly the increment, in order", async () => {
     const sessionId = randomUUID();
     const turnId = randomUUID();

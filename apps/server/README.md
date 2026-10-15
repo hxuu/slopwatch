@@ -35,7 +35,7 @@ admin API are authenticated with `Authorization: Bearer …`.
 | `GET`  | `/api/sessions/:id`                    | One Session with its Turns, Model requests, and cost. |
 | `GET`  | `/api/sessions/:id/events?since_seq=N` | Events with sequence greater than `N`.                |
 | `GET`  | `/`                                    | Dashboard: the Sessions table.                        |
-| `GET`  | `/sessions/:id`                        | Dashboard: one Session's Turns.                       |
+| `GET`  | `/sessions/:id`                        | Dashboard: one Session's Turn tree.                   |
 
 Ingestion attributes every Event to the token's User, dedupes retries by Event
 id, and assigns a per-Session monotonic `event_seq`.
