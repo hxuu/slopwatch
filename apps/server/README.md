@@ -26,16 +26,16 @@ Migrations run on startup, tracked in `schema_migrations`.
 The dashboard is HTML at `/`; the JSON API lives under `/api`. Ingestion and the
 admin API are authenticated with `Authorization: Bearer …`.
 
-| Method | Path                                   | Purpose                                              |
-| ------ | -------------------------------------- | ---------------------------------------------------- |
-| `GET`  | `/api/health`                          | Liveness.                                            |
-| `POST` | `/api/admin/users`                     | Add a User, mint their token (admin token required). |
-| `POST` | `/api/events`                          | Ingest a batch of `NormalEvent`s; `202`.             |
-| `GET`  | `/api/sessions`                        | List Sessions with their owner and Turn count.       |
-| `GET`  | `/api/sessions/:id`                    | One Session with its Turns.                          |
-| `GET`  | `/api/sessions/:id/events?since_seq=N` | Events with sequence greater than `N`.               |
-| `GET`  | `/`                                    | Dashboard: the Sessions table.                       |
-| `GET`  | `/sessions/:id`                        | Dashboard: one Session's Turns.                      |
+| Method | Path                                   | Purpose                                               |
+| ------ | -------------------------------------- | ----------------------------------------------------- |
+| `GET`  | `/api/health`                          | Liveness.                                             |
+| `POST` | `/api/admin/users`                     | Add a User, mint their token (admin token required).  |
+| `POST` | `/api/events`                          | Ingest a batch of `NormalEvent`s; `202`.              |
+| `GET`  | `/api/sessions`                        | List Sessions with owner, Turn count, and cost.       |
+| `GET`  | `/api/sessions/:id`                    | One Session with its Turns, Model requests, and cost. |
+| `GET`  | `/api/sessions/:id/events?since_seq=N` | Events with sequence greater than `N`.                |
+| `GET`  | `/`                                    | Dashboard: the Sessions table.                        |
+| `GET`  | `/sessions/:id`                        | Dashboard: one Session's Turns.                       |
 
 Ingestion attributes every Event to the token's User, dedupes retries by Event
 id, and assigns a per-Session monotonic `event_seq`.
@@ -63,5 +63,5 @@ stays green on a bare machine. CI runs Postgres as a service (see
 - Reads (the dashboard and `/api/sessions`) are unauthenticated. Org-wide
   visibility is the v1 model, but a real sign-in flow is not built yet.
 - Admin is create-User only: revoke and list arrive with the admin ticket.
-- `model_requests`, the rollup tables, the leaderboard, and spend are not part of
-  the spine. Model request Events are stored, but not yet projected.
+- The rollup tables, the leaderboard, and org-level spend are not built yet.
+  Model requests are projected and cost is reported per Session and Turn.

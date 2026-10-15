@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type {
+  ModelRequestEvent,
   SessionEndedEvent,
   SessionStartedEvent,
   TurnEndedEvent,
@@ -71,6 +72,26 @@ export function turnEnded(
     turnId: randomUUID(),
     response: "Renamed the table and updated the migration.",
     raw: { type: "message.assistant" },
+    ...overrides,
+  };
+}
+
+export function modelRequest(
+  overrides: Partial<ModelRequestEvent> = {},
+): ModelRequestEvent {
+  return {
+    kind: "model.request",
+    id: randomUUID(),
+    sessionId: randomUUID(),
+    agent: "opencode",
+    agentVersion: "1.0.0",
+    occurredAt: "2026-10-15T10:01:30.000Z",
+    turnId: randomUUID(),
+    provider: "anthropic",
+    model: "claude-sonnet-4-5",
+    inputTokens: 1_200,
+    outputTokens: 80,
+    raw: { type: "session.step.ended" },
     ...overrides,
   };
 }

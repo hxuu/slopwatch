@@ -20,6 +20,10 @@ _Avoid_: message, exchange, step.
 One HTTP call the agent makes to the model provider during a turn.
 _Avoid_: API call, inference, completion.
 
+**Cost**:
+The US dollar amount a **Model request** reports for one call to a provider. The Server stores what the coding agent reports and does not normalize across providers in v1, so a **Model request** with no reported cost has an unknown cost, not a free one. A **User**'s total **Cost** over a window is its spend.
+_Avoid_: price, charge, usage, tokens.
+
 **Subagent**:
 A coding agent spawned by another coding agent (e.g. via Claude Code's Task tool), treated as a child session.
 _Avoid_: sub-task, nested agent, delegate.

@@ -119,6 +119,12 @@ export interface ModelRequestEvent extends NormalEventBase {
   outputTokens: number;
   /** Round-trip latency of the call, when the Listener could measure it. */
   latencyMs?: number;
+  /**
+   * The cost of the call in US dollars, as the coding agent reported it. The
+   * Server stores what the agent reports and does not normalize across
+   * providers, so a Listener that cannot see a cost leaves this unset.
+   */
+  costUsd?: number;
 }
 
 /**

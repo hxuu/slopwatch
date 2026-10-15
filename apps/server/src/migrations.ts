@@ -74,4 +74,28 @@ export const migrations: Migration[] = [
       create index events_session_seq_idx on events (session_id, event_seq);
     `,
   },
+  {
+    id: "0002_model_requests",
+    sql: `
+      create table model_requests (
+        id text primary key,
+        session_id text not null references sessions(id) on delete cascade,
+        event_seq integer not null,
+        turn_id text not null,
+        provider text not null,
+        model text not null,
+        input_tokens integer,
+        output_tokens integer,
+        latency_ms integer,
+        cost_usd numeric(14, 6),
+        occurred_at timestamptz not null,
+        created_at timestamptz not null default now()
+      );
+
+      create index model_requests_session_turn_idx
+        on model_requests (session_id, turn_id);
+      create index model_requests_session_seq_idx
+        on model_requests (session_id, event_seq);
+    `,
+  },
 ];
