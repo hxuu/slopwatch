@@ -1,5 +1,4 @@
-import { sendEvents, type NormalEvent } from "@slopwatch/events";
+import { sendEvents } from "@slopwatch/events";
 
-const _stub: NormalEvent = { kind: "stub" };
 void sendEvents;
 console.log("slopwatch claude-code listener stub");

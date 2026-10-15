@@ -6,9 +6,15 @@
   "scripts": {
     "dev": "bun run src/index.ts",
     "typecheck": "tsgo --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "pg:up": "docker run --rm -d --name slopwatch-server-pg -p 55433:5432 -e POSTGRES_USER=slopwatch -e POSTGRES_PASSWORD=slopwatch -e POSTGRES_DB=slopwatch postgres:17-alpine",
+    "pg:down": "docker rm -f slopwatch-server-pg"
   },
   "dependencies": {
-    "@slopwatch/events": "workspace:*"
+    "@slopwatch/events": "workspace:*",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
   }
 }
