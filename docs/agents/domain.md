@@ -22,7 +22,8 @@ Single-context repo:
 │   └── agents/         ← this skill's output
 ├── apps/
 ├── packages/
-└── listeners/
+├── listeners/
+└── spikes/             ← throwaway validation spikes
 ```
 
 ## Use the glossary's vocabulary

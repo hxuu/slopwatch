@@ -17,3 +17,5 @@ Bun is the runtime and toolchain for the Listener, the Server, development, and 
 ## Consequence
 
 We are on the hook for Bun's compatibility quirks on the four surfaces we rely on: the Postgres client (`pg`), file-watching, local IPC (Unix sockets / Windows named pipes), and OS keychain access. Validate these before significant code is written against them; if any is broken on Bun, revisit this decision rather than working around it.
+
+**Validated 2026-10-15 — go.** The two surfaces v1 depends on, the `pg` client and OS keychain access, were proven on Bun against a real Postgres and a real keychain, with no Bun-specific workaround needed; both also work inside a `bun build --compile` binary. The one trap found is a `@napi-rs/keyring` default (its silent fallback to the non-persistent kernel keyring on Linux), pinned around in the keychain module. File-watching and local IPC defer with the Codex and Copilot Listeners that need them, since v1's only Listener is an in-process OpenCode plugin. Evidence and reproduction: [`../research/bun-surfaces-validation.md`](../research/bun-surfaces-validation.md).

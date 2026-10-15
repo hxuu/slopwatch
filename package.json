@@ -4,7 +4,8 @@
   "workspaces": [
     "apps/*",
     "listeners/*",
-    "packages/*"
+    "packages/*",
+    "spikes/*"
   ],
   "scripts": {
     "typecheck": "bun run --filter '*' typecheck",
