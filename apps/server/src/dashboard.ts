@@ -1,4 +1,6 @@
 import type { SessionDetail, SessionSummary, Turn } from "./db";
+import { escapeHtml } from "./html";
+import { renderLiveEvents } from "./live";
 
 /** The dashboard's Sessions index: every Session, newest first. */
 export function renderSessionList(sessions: SessionSummary[]): string {
@@ -49,6 +51,7 @@ export function renderSessionDetail(session: SessionDetail): string {
     </dl>
     <h2>Turns</h2>
     ${turns}
+    ${renderLiveEvents(session.id, session.eventSeq)}
     <h2>Subagents</h2>
     ${renderSubagents(session.childSessions)}`;
 
@@ -160,20 +163,15 @@ function page(title: string, body: string): string {
       ul.subagents { list-style: none; margin: 0; padding: 0; }
       ul.subagents li { display: flex; gap: 0.75rem; align-items: baseline; padding: 0.35rem 0; border-bottom: 1px solid #8884; }
       ul.subagents .num { margin-left: auto; }
+      ol.events { list-style: none; margin: 0; padding: 0; }
+      ol.events li.event { display: flex; gap: 0.75rem; align-items: baseline; padding: 0.25rem 0; border-bottom: 1px solid #8884; }
+      ol.events .seq { font-variant-numeric: tabular-nums; opacity: 0.6; min-width: 3rem; }
+      ol.events .kind { font-family: ui-monospace, monospace; }
+      ol.events .summary { overflow-wrap: anywhere; }
       h4 { margin: 0.6rem 0 0.3rem; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.7; }
     </style>
   </head>
   <body>${body}</body>
 </html>
 `;
-}
-
-/** Escape text for interpolation into HTML. */
-export function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
 }

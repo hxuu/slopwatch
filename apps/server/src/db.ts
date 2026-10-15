@@ -52,6 +52,8 @@ export interface Turn {
 /** A Session with its Turns and the child Sessions it spawned. */
 export interface SessionDetail extends SessionSummary {
   spawnedByTurnId: string | null;
+  /** The Session's last assigned sequence, so a live view can resume from it. */
+  eventSeq: number;
   turns: Turn[];
   /** Sessions spawned as Subagents by a Turn in this Session. */
   childSessions: SessionSummary[];
@@ -423,6 +425,10 @@ interface SessionSummaryRow extends SessionRow {
   cost_usd: string | null;
 }
 
+interface SessionDetailRow extends SessionRow {
+  event_seq: number;
+}
+
 /** The fields a Session shares between the list and detail views. */
 function toSessionFields(
   row: SessionRow,
@@ -479,8 +485,8 @@ export async function getSession(
   pool: Pool,
   sessionId: string,
 ): Promise<SessionDetail | null> {
-  const { rows } = await pool.query<SessionRow>(
-    `select ${SESSION_COLUMNS}
+  const { rows } = await pool.query<SessionDetailRow>(
+    `select ${SESSION_COLUMNS}, s.event_seq
      ${SESSION_FROM}
      where s.id = $1`,
     [sessionId],
@@ -573,6 +579,7 @@ export async function getSession(
   return {
     ...toSessionFields(session),
     spawnedByTurnId: session.spawned_by_turn_id,
+    eventSeq: session.event_seq,
     turnCount: turns.length,
     costUsd,
     turns,
