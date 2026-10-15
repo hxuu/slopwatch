@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./test/harness": "./src/test/harness.ts"
+  },
   "scripts": {
     "dev": "bun run src/index.ts",
     "typecheck": "tsgo --noEmit",
