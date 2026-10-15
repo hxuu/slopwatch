@@ -2,11 +2,16 @@ import { beforeEach, expect, test } from "bun:test";
 import { describeServer } from "@slopwatch/server/test/harness";
 import { createListener } from "./listener";
 import {
+  DELEGATING_SESSION_ID,
   PROMPT,
   RESPONSE,
   SESSION_ID,
+  SPAWN_TURN_ID,
+  SUBAGENT_SESSION_ID,
+  delegatingSession,
   driftedEvent,
   recordedSession,
+  subagentSession,
 } from "./test/fixtures";
 
 /**
@@ -113,6 +118,29 @@ describeServer("capturing a Session with the OpenCode Listener", (server) => {
 
     expect(body).toContain(SESSION_ID);
     expect(body).toContain("Alice");
+  });
+
+  test("a Subagent is captured as a child Session linked to its spawning Turn", async () => {
+    const capture = listener(() => {});
+    for (const event of delegatingSession) capture.handleEvent(event);
+    for (const event of subagentSession) capture.handleEvent(event);
+    await capture.stop();
+
+    const child = (await (
+      await fetch(`${server().url}/api/sessions/${SUBAGENT_SESSION_ID}`)
+    ).json()) as {
+      parentSessionId: string | null;
+      spawnedByTurnId: string | null;
+    };
+    expect(child.parentSessionId).toBe(DELEGATING_SESSION_ID);
+    expect(child.spawnedByTurnId).toBe(SPAWN_TURN_ID);
+
+    const parent = (await (
+      await fetch(`${server().url}/api/sessions/${DELEGATING_SESSION_ID}`)
+    ).json()) as { childSessions: Array<{ id: string }> };
+    expect(parent.childSessions.map((session) => session.id)).toEqual([
+      SUBAGENT_SESSION_ID,
+    ]);
   });
 
   test("an unrecognized event shape is reported loudly, not shipped", async () => {

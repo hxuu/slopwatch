@@ -44,6 +44,10 @@ The plugin subscribes to OpenCode's public event stream and normalizes:
 OpenCode names a Turn by its assistant message id, so that id is the Turn id
 every Tool event and Model request in the Turn carries.
 
+A Subagent is a `session.created` whose `parentID` names the Session that
+spawned it. OpenCode names only the parent there, so the Listener links the child
+to the parent's `task` Tool call, which runs inside the spawning Turn.
+
 OpenCode's schema has drifted before. A handled event whose payload no longer
 matches is reported loudly rather than dropped in silence; unrelated event types
 (tui, pty, shell) are ignored on purpose.

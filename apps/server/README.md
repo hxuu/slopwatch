@@ -32,13 +32,18 @@ admin API are authenticated with `Authorization: Bearer …`.
 | `POST` | `/api/admin/users`                     | Add a User, mint their token (admin token required).  |
 | `POST` | `/api/events`                          | Ingest a batch of `NormalEvent`s; `202`.              |
 | `GET`  | `/api/sessions`                        | List Sessions with owner, Turn count, and cost.       |
-| `GET`  | `/api/sessions/:id`                    | One Session with its Turns, Model requests, and cost. |
+| `GET`  | `/api/sessions/:id`                    | One Session with its Turns, child Sessions, and cost. |
 | `GET`  | `/api/sessions/:id/events?since_seq=N` | Events with sequence greater than `N`.                |
 | `GET`  | `/`                                    | Dashboard: the Sessions table.                        |
-| `GET`  | `/sessions/:id`                        | Dashboard: one Session's Turn tree.                   |
+| `GET`  | `/sessions/:id`                        | Dashboard: one Session's Turn tree and Subagents.     |
 
 Ingestion attributes every Event to the token's User, dedupes retries by Event
 id, and assigns a per-Session monotonic `event_seq`.
+
+A Subagent is a Session whose `parent_session_id` names its spawning Session and
+whose `spawned_by_turn_id` names the Turn that launched it. The parent's detail
+lists its child Sessions, each readable on its own with its own Turns and cost,
+which is never folded into the parent's.
 
 ## Tests
 

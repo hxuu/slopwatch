@@ -45,11 +45,50 @@ export function renderSessionDetail(session: SessionDetail): string {
       <dt>cwd</dt><dd><code>${escapeHtml(session.cwd ?? "")}</code></dd>
       <dt>Started</dt><dd>${escapeHtml(session.startedAt ?? "")}</dd>
       <dt>Ended</dt><dd>${escapeHtml(session.endedAt ?? "still active")}</dd>
+      ${renderSpawnLink(session)}
     </dl>
     <h2>Turns</h2>
-    ${turns}`;
+    ${turns}
+    <h2>Subagents</h2>
+    ${renderSubagents(session.childSessions)}`;
 
   return page(escapeHtml(session.id), body);
+}
+
+/**
+ * When this Session is itself a Subagent, its parent Session and the Turn it was
+ * spawned by, as links back.
+ */
+function renderSpawnLink(session: SessionDetail): string {
+  if (!session.parentSessionId) return "";
+  const spawnedBy = session.spawnedByTurnId
+    ? `<code>${escapeHtml(session.spawnedByTurnId)}</code>`
+    : "an unknown Turn";
+  return `<dt>Subagent of</dt><dd><a href="/sessions/${escapeHtml(session.parentSessionId)}"><code>${escapeHtml(session.parentSessionId)}</code></a>, spawned by ${spawnedBy}</dd>`;
+}
+
+/** The child Sessions this Session spawned, each linked and costed its own. */
+function renderSubagents(childSessions: SessionSummary[]): string {
+  if (childSessions.length === 0) {
+    return `<p class="empty">No Subagents.</p>`;
+  }
+  const items = childSessions
+    .map(
+      (child) => `
+      <li class="subagent">
+        <a href="/sessions/${escapeHtml(child.id)}"><code>${escapeHtml(child.id)}</code></a>
+        <span class="muted">${escapeHtml(child.agent)}</span>
+        <span class="num">${child.turnCount} Turns</span>
+        <span class="num">${formatUsd(child.costUsd)}</span>
+      </li>`,
+    )
+    .join("");
+  return `<ul class="subagents">${items}</ul>`;
+}
+
+/** A cost as dollars, or `unknown` when no Model request reported one. */
+function formatUsd(costUsd: number | null): string {
+  return costUsd === null ? "unknown" : `$${costUsd.toFixed(4)}`;
 }
 
 /**
@@ -118,6 +157,9 @@ function page(title: string, body: string): string {
       .turn { border: 1px solid #8884; border-radius: 8px; padding: 0.5rem 1rem 1rem; margin-bottom: 1rem; }
       ol.turns { list-style: none; margin: 0; padding-left: 0; }
       ol.turns ol.turns { margin-top: 0.75rem; padding-left: 1rem; border-left: 2px solid #8884; }
+      ul.subagents { list-style: none; margin: 0; padding: 0; }
+      ul.subagents li { display: flex; gap: 0.75rem; align-items: baseline; padding: 0.35rem 0; border-bottom: 1px solid #8884; }
+      ul.subagents .num { margin-left: auto; }
       h4 { margin: 0.6rem 0 0.3rem; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.7; }
     </style>
   </head>
