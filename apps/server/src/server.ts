@@ -66,6 +66,20 @@ async function route(
       return await addUser(request, pool, adminToken);
     }
 
+    if (request.method === "GET" && pathname === "/api/admin/users") {
+      return await listUsers(request, pool, adminToken);
+    }
+
+    const revokeMatch = /^\/api\/admin\/users\/([^/]+)\/revoke$/.exec(pathname);
+    if (request.method === "POST" && revokeMatch) {
+      return await revokeUserToken(
+        request,
+        pool,
+        adminToken,
+        decodeURIComponent(revokeMatch[1]),
+      );
+    }
+
     if (request.method === "POST" && pathname === "/api/events") {
       return await ingest(request, pool);
     }
@@ -94,7 +108,7 @@ async function route(
         pool,
         decodeURIComponent(sessionPageMatch[1]),
       );
-      if (!session) return new Response("session not found", { status: 404 });
+      if (!session) return notFound("session not found");
       return html(renderSessionDetail(session));
     }
   } catch (error) {
@@ -111,15 +125,8 @@ async function addUser(
   pool: Pool,
   adminToken: string | undefined,
 ): Promise<Response> {
-  if (!adminToken) {
-    return new Response("admin API is disabled: set SLOPWATCH_ADMIN_TOKEN", {
-      status: 503,
-    });
-  }
-  const presented = bearerToken(request);
-  if (!presented || !tokensMatch(presented, adminToken)) {
-    return unauthorized();
-  }
+  const denied = requireAdmin(request, adminToken);
+  if (denied) return denied;
 
   const body = await readJson(request);
   if (body instanceof Response) return body;
@@ -140,6 +147,60 @@ async function addUser(
     }
     throw error;
   }
+}
+
+/** `GET /api/admin/users`: list every User with their identity fields. */
+async function listUsers(
+  request: Request,
+  pool: Pool,
+  adminToken: string | undefined,
+): Promise<Response> {
+  const denied = requireAdmin(request, adminToken);
+  if (denied) return denied;
+
+  return Response.json(await db.listUsers(pool));
+}
+
+/**
+ * `POST /api/admin/users/:id/revoke`: revoke a User's token, taking effect on
+ * their next ingestion attempt.
+ */
+async function revokeUserToken(
+  request: Request,
+  pool: Pool,
+  adminToken: string | undefined,
+  userId: string,
+): Promise<Response> {
+  const denied = requireAdmin(request, adminToken);
+  if (denied) return denied;
+
+  // A malformed User id names no User, so it is a 404 rather than a 500 from
+  // Postgres rejecting the value as a uuid.
+  if (!isUuid(userId) || !(await db.userExists(pool, userId))) {
+    return notFound("User not found");
+  }
+
+  await db.revokeUserTokens(pool, userId);
+  return new Response(null, { status: 204 });
+}
+
+/**
+ * Guard an admin request. Admin is off without a configured token, and every
+ * admin call must present it. Returns the response to send back, or null when
+ * the caller may proceed.
+ */
+function requireAdmin(
+  request: Request,
+  adminToken: string | undefined,
+): Response | null {
+  if (!adminToken) {
+    return new Response("admin API is disabled: set SLOPWATCH_ADMIN_TOKEN", {
+      status: 503,
+    });
+  }
+  const presented = bearerToken(request);
+  if (!presented || !tokensMatch(presented, adminToken)) return unauthorized();
+  return null;
 }
 
 /**
@@ -188,7 +249,7 @@ async function readEvents(
     return badRequest("`since_seq` must be a non-negative integer");
   }
   if (!(await db.sessionExists(pool, sessionId))) {
-    return new Response("session not found", { status: 404 });
+    return notFound("session not found");
   }
   return Response.json({
     events: await db.listEventsSince(pool, sessionId, sinceSeq),
@@ -198,7 +259,7 @@ async function readEvents(
 /** `GET /api/sessions/:id`: one Session with its Turns. */
 async function readSession(pool: Pool, sessionId: string): Promise<Response> {
   const session = await db.getSession(pool, sessionId);
-  if (!session) return new Response("session not found", { status: 404 });
+  if (!session) return notFound("session not found");
   return Response.json(session);
 }
 
@@ -233,6 +294,10 @@ function unauthorized(): Response {
   return new Response("unauthorized", { status: 401 });
 }
 
+function notFound(message: string): Response {
+  return new Response(message, { status: 404 });
+}
+
 function html(body: string): Response {
   return new Response(body, {
     headers: { "content-type": "text/html; charset=utf-8" },
@@ -253,4 +318,11 @@ function isUniqueViolation(error: unknown): boolean {
 
 function isNonBlankString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuid(value: string): boolean {
+  return UUID_PATTERN.test(value);
 }

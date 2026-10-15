@@ -142,6 +142,14 @@ export async function createUser(
   return rows[0];
 }
 
+/** List every User with their identity fields, oldest first. */
+export async function listUsers(pool: Pool): Promise<User[]> {
+  const { rows } = await pool.query<User>(
+    "select id, name, email from users order by created_at asc, name asc",
+  );
+  return rows;
+}
+
 /** Mint a long-lived bearer token for a User and store only its hash. */
 export async function issueToken(pool: Pool, userId: string): Promise<string> {
   const token = mintToken();
@@ -150,6 +158,28 @@ export async function issueToken(pool: Pool, userId: string): Promise<string> {
     hashToken(token),
   ]);
   return token;
+}
+
+/** Whether a User with this id exists. */
+export async function userExists(pool: Pool, userId: string): Promise<boolean> {
+  const { rowCount } = await pool.query("select 1 from users where id = $1", [
+    userId,
+  ]);
+  return (rowCount ?? 0) > 0;
+}
+
+/**
+ * Revoke every active token a User holds, so their next ingestion attempt is
+ * rejected.
+ */
+export async function revokeUserTokens(
+  pool: Pool,
+  userId: string,
+): Promise<void> {
+  await pool.query(
+    "update tokens set revoked_at = now() where user_id = $1 and revoked_at is null",
+    [userId],
+  );
 }
 
 /** Resolve the User a bearer token belongs to, or null when it is not valid. */

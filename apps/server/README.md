@@ -29,13 +29,20 @@ admin API are authenticated with `Authorization: Bearer …`.
 | Method | Path                                   | Purpose                                               |
 | ------ | -------------------------------------- | ----------------------------------------------------- |
 | `GET`  | `/api/health`                          | Liveness.                                             |
-| `POST` | `/api/admin/users`                     | Add a User, mint their token (admin token required).  |
+| `POST` | `/api/admin/users`                     | Add a User, mint their token once (admin token).      |
+| `GET`  | `/api/admin/users`                     | List Users with their identity fields (admin token).  |
+| `POST` | `/api/admin/users/:id/revoke`          | Revoke a User's token (admin).                        |
 | `POST` | `/api/events`                          | Ingest a batch of `NormalEvent`s; `202`.              |
 | `GET`  | `/api/sessions`                        | List Sessions with owner, Turn count, and cost.       |
 | `GET`  | `/api/sessions/:id`                    | One Session with its Turns, child Sessions, and cost. |
 | `GET`  | `/api/sessions/:id/events?since_seq=N` | Events with sequence greater than `N`.                |
 | `GET`  | `/`                                    | Dashboard: the Sessions table.                        |
 | `GET`  | `/sessions/:id`                        | Dashboard: one Session's Turn tree and Subagents.     |
+
+The admin plane requires the `Authorization: Bearer …` admin token. Creating a
+User returns their token exactly once; the Server stores only its hash, so the
+token is never retrievable again. Revoking it rejects the User's next ingestion
+attempt.
 
 Ingestion attributes every Event to the token's User, dedupes retries by Event
 id, and assigns a per-Session monotonic `event_seq`.
@@ -67,6 +74,7 @@ stays green on a bare machine. CI runs Postgres as a service (see
 
 - Reads (the dashboard and `/api/sessions`) are unauthenticated. Org-wide
   visibility is the v1 model, but a real sign-in flow is not built yet.
-- Admin is create-User only: revoke and list arrive with the admin ticket.
+- The admin plane is create-User, list-Users, and revoke-token. Re-minting a
+  token for a User whose token was revoked is not built yet.
 - The rollup tables, the leaderboard, and org-level spend are not built yet.
   Model requests are projected and cost is reported per Session and Turn.
