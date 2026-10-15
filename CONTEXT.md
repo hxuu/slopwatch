@@ -44,6 +44,10 @@ _Avoid_: developer, member, account. ("Developer" is a role a **User** plays whe
 A normalized record a **Listener** produces and ships to the **Server** — the unit of communication between them. Sessions, Turns, and Model requests are all carried as Events. The shared package that defines the Event schema and the typed Listener→Server client is `@slopwatch/events`; the TypeScript type is `NormalEvent` (to avoid colliding with the global DOM `Event`).
 _Avoid_: message, payload, wire format, record.
 
+**Bearer token**:
+The long-lived credential the **Server** mints for a **User** and an admin hands them out-of-band; the **Listener** sends it as an `Authorization: Bearer` header. The **Server** stores only its hash and shows it once at mint. Revoking it rejects that **User**'s next ingestion attempt, so a departed developer stops shipping Events immediately.
+_Avoid_: key, secret, API key, session cookie.
+
 ## Relationships
 
 - A **Session** contains a DAG of **Turns**; most agents produce a linear DAG, Pi can branch.
@@ -52,6 +56,7 @@ _Avoid_: message, payload, wire format, record.
 - A **Listener** produces **Sessions**, **Turns**, and **Model requests** for exactly one **Coding agent**; it runs either as a subprocess (Claude Code, Codex, Copilot) or as an in-process extension (Pi, OpenCode).
 - Many **Listeners** POST to one **Server**; the **Server** is the only component that talks to Postgres.
 - **Listeners** and the **Server** communicate by exchanging **Events** defined in `@slopwatch/events`.
+- The **Server** derives the acting **User** from their **Bearer token**; the payload never asserts identity.
 
 ## Example dialogue
 
