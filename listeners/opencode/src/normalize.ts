@@ -36,6 +36,11 @@ interface SessionState {
   toolNames: Map<string, string>;
   /** Tool call id to when it started, for durations. */
   toolStartedAt: Map<string, number>;
+  /**
+   * Turn ids of `task` Tool calls, in call order. Each spawns one child Session,
+   * which claims the oldest one when it announces itself.
+   */
+  spawnTurnIds: string[];
 }
 
 /** The fields every recorded OpenCode event carries. */
@@ -46,6 +51,13 @@ type RecordedEvent = {
 };
 
 const AGENT = "opencode";
+
+/**
+ * The OpenCode Tool that spawns a Subagent. Its call runs inside the parent
+ * Turn, so remembering that Turn as the call goes by is how a child Session
+ * learns which Turn spawned it: `session.created` names only the parent.
+ */
+const SUBAGENT_TOOL = "task";
 
 export class Normalizer {
   private readonly sessions = new Map<string, SessionState>();
@@ -107,20 +119,26 @@ export class Normalizer {
     if (!sessionId) return [];
 
     const version = nonBlank(event.data.version) ?? this.options.agentVersion;
-    const state = this.state(sessionId, version);
+    this.state(sessionId, version);
     const cwd =
       nonBlank(event.data.location?.directory) ??
       nonBlank(event.location?.directory) ??
       this.options.directory;
+
+    // A Subagent announces only its parent Session. The Turn that spawned it
+    // comes from the parent's `task` Tool call, if it has been seen.
+    const parentSessionId = nonBlank(event.data.parentID);
+    const spawnedByTurnId = parentSessionId
+      ? this.takeSpawnTurn(parentSessionId)
+      : undefined;
 
     return [
       {
         ...this.base(event, sessionId, "session.started"),
         kind: "session.started",
         cwd,
-        ...(nonBlank(event.data.parentID)
-          ? { parentSessionId: event.data.parentID }
-          : {}),
+        ...(parentSessionId ? { parentSessionId } : {}),
+        ...(spawnedByTurnId ? { spawnedByTurnId } : {}),
       },
     ];
   }
@@ -259,6 +277,12 @@ export class Normalizer {
     if (!sessionId) return [];
     const { assistantMessageID, id, input } = event.data;
     const state = this.state(sessionId, this.options.agentVersion);
+    // The name arrives on `session.tool.input.started`, before the call.
+    const name = state.toolNames.get(id) ?? "unknown";
+
+    // A `task` call runs inside this Turn and spawns one child Session, which
+    // will claim this Turn when its `session.created` arrives.
+    if (name === SUBAGENT_TOOL) state.spawnTurnIds.push(assistantMessageID);
 
     state.toolStartedAt.set(id, event.created);
     return [
@@ -268,8 +292,7 @@ export class Normalizer {
         kind: "tool.call",
         turnId: assistantMessageID,
         toolCallId: id,
-        // The name arrives on `session.tool.input.started`, before the call.
-        name: state.toolNames.get(id) ?? "unknown",
+        name,
         input,
       },
     ];
@@ -430,6 +453,15 @@ export class Normalizer {
     return { durationMs: Math.max(0, endedAt - startedAt) };
   }
 
+  /**
+   * The Turn that spawned a Subagent, claimed from the parent Session's queue of
+   * `task` Tool calls. Omitted when the parent's call has not been seen, so an
+   * unlinked child is preferred to a wrongly linked one.
+   */
+  private takeSpawnTurn(parentSessionId: string): string | undefined {
+    return this.sessions.get(parentSessionId)?.spawnTurnIds.shift();
+  }
+
   private requireSessionId(event: {
     type: string;
     data?: { sessionID?: unknown };
@@ -455,6 +487,7 @@ export class Normalizer {
         models: new Map(),
         toolNames: new Map(),
         toolStartedAt: new Map(),
+        spawnTurnIds: [],
       };
       this.sessions.set(sessionId, state);
     }

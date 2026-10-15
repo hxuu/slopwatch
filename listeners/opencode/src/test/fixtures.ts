@@ -196,6 +196,104 @@ export const recordedSession: OpenCodeEvent[] = [
 ];
 
 /**
+ * A Session that delegates to a Subagent through OpenCode's `task` Tool: the
+ * parent Session is created, then the `task` call runs inside its Turn, at which
+ * point OpenCode spawns the child Session below.
+ */
+export const DELEGATING_SESSION_ID = "ses_delegating";
+/** The parent Turn whose `task` call spawns the Subagent. */
+export const SPAWN_TURN_ID = "msg_assistant_task";
+
+const delegatingCreated: SessionCreated = {
+  id: "evt_del_1",
+  created: at(20),
+  type: "session.created",
+  durable: { aggregateID: DELEGATING_SESSION_ID, seq: 1, version: 1 },
+  location: { directory: "/home/dev/project" },
+  data: {
+    sessionID: DELEGATING_SESSION_ID,
+    projectID: "prj_1",
+    location: { directory: "/home/dev/project" },
+    slug: "plan-the-refactor",
+    version: "2.0.26",
+  },
+};
+
+const taskInputStarted: SessionToolInputStarted = {
+  id: "evt_del_2",
+  created: at(21),
+  type: "session.tool.input.started",
+  durable: { aggregateID: DELEGATING_SESSION_ID, seq: 2, version: 1 },
+  data: {
+    sessionID: DELEGATING_SESSION_ID,
+    assistantMessageID: SPAWN_TURN_ID,
+    id: "call_task",
+    name: "task",
+  },
+};
+
+const taskCalled: SessionToolCalled = {
+  id: "evt_del_3",
+  created: at(22),
+  type: "session.tool.called",
+  durable: { aggregateID: DELEGATING_SESSION_ID, seq: 3, version: 1 },
+  data: {
+    sessionID: DELEGATING_SESSION_ID,
+    assistantMessageID: SPAWN_TURN_ID,
+    id: "call_task",
+    input: {
+      description: "explore the schema",
+      prompt: "find the events table",
+    },
+    executed: true,
+  },
+};
+
+/** The parent Session's events up to the point it spawns the Subagent. */
+export const delegatingSession: OpenCodeEvent[] = [
+  delegatingCreated,
+  taskInputStarted,
+  taskCalled,
+];
+
+/**
+ * The child Session OpenCode spawns for the Subagent: a fresh `session.created`
+ * whose `parentID` names the Session that spawned it, then its own
+ * `session.deleted`.
+ */
+export const SUBAGENT_SESSION_ID = "ses_recorded_subagent";
+
+const subagentCreated: SessionCreated = {
+  id: "evt_sub_1",
+  created: at(23),
+  type: "session.created",
+  durable: { aggregateID: SUBAGENT_SESSION_ID, seq: 1, version: 1 },
+  location: { directory: "/home/dev/project" },
+  data: {
+    sessionID: SUBAGENT_SESSION_ID,
+    projectID: "prj_1",
+    location: { directory: "/home/dev/project" },
+    parentID: DELEGATING_SESSION_ID,
+    slug: "explore-schema",
+    version: "2.0.26",
+  },
+};
+
+const subagentDeleted: SessionDeleted = {
+  id: "evt_sub_2",
+  created: at(24),
+  type: "session.deleted",
+  durable: { aggregateID: SUBAGENT_SESSION_ID, seq: 2, version: 2 },
+  data: { sessionID: SUBAGENT_SESSION_ID },
+};
+
+/** The Subagent child Session's OpenCode plugin events, in dispatch order. */
+export const subagentSession: OpenCodeEvent[] = [
+  subagentCreated,
+  subagentDeleted,
+];
+
+/**
  * A `session.created` whose payload no longer carries `data.sessionID`: the
  * shape OpenCode would hand a Listener after a schema drift. Cast because the
  * whole point is that it no longer matches the declared type.

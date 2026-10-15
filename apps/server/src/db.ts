@@ -49,10 +49,12 @@ export interface Turn {
   modelRequests: ModelRequest[];
 }
 
-/** A Session with its Turns. */
+/** A Session with its Turns and the child Sessions it spawned. */
 export interface SessionDetail extends SessionSummary {
   spawnedByTurnId: string | null;
   turns: Turn[];
+  /** Sessions spawned as Subagents by a Turn in this Session. */
+  childSessions: SessionSummary[];
 }
 
 /** An Event as stored, carrying the per-Session sequence it was assigned. */
@@ -368,6 +370,9 @@ const SESSION_COLUMNS = `s.id, s.agent, s.agent_version, s.cwd,
   u.id as user_id, u.name as user_name, u.email as user_email,
   s.started_at, s.ended_at, s.parent_session_id, s.spawned_by_turn_id`;
 const SESSION_FROM = `from sessions s join users u on u.id = s.user_id`;
+/** A Session's Turn count and cost, summed from its own Model requests only. */
+const SESSION_AGGREGATES = `(select count(*) from turns t where t.session_id = s.id) as turn_count,
+  (select sum(m.cost_usd) from model_requests m where m.session_id = s.id) as cost_usd`;
 
 interface SessionRow {
   id: string;
@@ -381,6 +386,11 @@ interface SessionRow {
   ended_at: Date | null;
   parent_session_id: string | null;
   spawned_by_turn_id: string | null;
+}
+
+interface SessionSummaryRow extends SessionRow {
+  turn_count: string;
+  cost_usd: string | null;
 }
 
 /** The fields a Session shares between the list and detail views. */
@@ -399,27 +409,42 @@ function toSessionFields(
   };
 }
 
+function toSessionSummary(row: SessionSummaryRow): SessionSummary {
+  return {
+    ...toSessionFields(row),
+    turnCount: Number(row.turn_count),
+    costUsd: toCost(row.cost_usd),
+  };
+}
+
 /** List every Session, newest first, with its Turn count and cost. */
 export async function listSessions(pool: Pool): Promise<SessionSummary[]> {
-  const { rows } = await pool.query<
-    SessionRow & { turn_count: string; cost_usd: string | null }
-  >(
-    `select ${SESSION_COLUMNS},
-       (select count(*) from turns t where t.session_id = s.id) as turn_count,
-       (select sum(m.cost_usd) from model_requests m
-        where m.session_id = s.id) as cost_usd
+  const { rows } = await pool.query<SessionSummaryRow>(
+    `select ${SESSION_COLUMNS}, ${SESSION_AGGREGATES}
      ${SESSION_FROM}
      order by s.started_at desc nulls last, s.created_at desc`,
   );
 
-  return rows.map((row) => ({
-    ...toSessionFields(row),
-    turnCount: Number(row.turn_count),
-    costUsd: toCost(row.cost_usd),
-  }));
+  return rows.map(toSessionSummary);
 }
 
-/** Read one Session with its Turns, or null when it does not exist. */
+/** Sessions spawned as Subagents by a Turn in `parentSessionId`. */
+async function listChildSessions(
+  pool: Pool,
+  parentSessionId: string,
+): Promise<SessionSummary[]> {
+  const { rows } = await pool.query<SessionSummaryRow>(
+    `select ${SESSION_COLUMNS}, ${SESSION_AGGREGATES}
+     ${SESSION_FROM}
+     where s.parent_session_id = $1
+     order by s.started_at asc nulls last, s.created_at asc`,
+    [parentSessionId],
+  );
+
+  return rows.map(toSessionSummary);
+}
+
+/** Read one Session with its Turns and child Sessions, or null when absent. */
 export async function getSession(
   pool: Pool,
   sessionId: string,
@@ -521,6 +546,7 @@ export async function getSession(
     turnCount: turns.length,
     costUsd,
     turns,
+    childSessions: await listChildSessions(pool, sessionId),
   };
 }
 
