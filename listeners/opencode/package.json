@@ -1,0 +1,22 @@
+{
+  "name": "@slopwatch/listener-opencode",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@napi-rs/keyring": "2.1.1",
+    "@opencode/client": "2.0.26",
+    "@opencode/plugin": "2.0.26",
+    "@slopwatch/events": "workspace:*"
+  },
+  "devDependencies": {
+    "@slopwatch/server": "workspace:*"
+  }
+}
