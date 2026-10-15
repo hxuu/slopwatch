@@ -21,6 +21,19 @@ export interface SessionSummary {
   endedAt: string | null;
   parentSessionId: string | null;
   turnCount: number;
+  /** How much the Session cost, or null when no Model request reported one. */
+  costUsd: number | null;
+}
+
+/** One Model request inside a Turn: one call the agent made to a provider. */
+export interface ModelRequest {
+  id: string;
+  provider: string;
+  model: string;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  latencyMs: number | null;
+  costUsd: number | null;
 }
 
 /** One Turn inside a Session. */
@@ -31,6 +44,9 @@ export interface Turn {
   response: string | null;
   startedAt: string | null;
   endedAt: string | null;
+  /** How much the Turn cost, or null when no Model request reported one. */
+  costUsd: number | null;
+  modelRequests: ModelRequest[];
 }
 
 /** A Session with its Turns. */
@@ -314,6 +330,28 @@ async function applyEvent(
         [event.sessionId, event.turnId, seq, event.response, event.occurredAt],
       );
       return;
+    case "model.request":
+      await client.query(
+        `insert into model_requests
+           (id, session_id, event_seq, turn_id, provider, model,
+            input_tokens, output_tokens, latency_ms, cost_usd, occurred_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         on conflict (id) do nothing`,
+        [
+          event.id,
+          event.sessionId,
+          seq,
+          event.turnId,
+          event.provider,
+          event.model,
+          event.inputTokens,
+          event.outputTokens,
+          event.latencyMs ?? null,
+          event.costUsd ?? null,
+          event.occurredAt,
+        ],
+      );
+      return;
     case "session.ended":
       await client.query(
         "update sessions set ended_at = coalesce(ended_at, $2) where id = $1",
@@ -346,7 +384,9 @@ interface SessionRow {
 }
 
 /** The fields a Session shares between the list and detail views. */
-function toSessionFields(row: SessionRow): Omit<SessionSummary, "turnCount"> {
+function toSessionFields(
+  row: SessionRow,
+): Omit<SessionSummary, "turnCount" | "costUsd"> {
   return {
     id: row.id,
     agent: row.agent,
@@ -359,19 +399,23 @@ function toSessionFields(row: SessionRow): Omit<SessionSummary, "turnCount"> {
   };
 }
 
-/** List every Session, newest first, with its Turn count. */
+/** List every Session, newest first, with its Turn count and cost. */
 export async function listSessions(pool: Pool): Promise<SessionSummary[]> {
-  const { rows } = await pool.query<SessionRow & { turn_count: string }>(
-    `select ${SESSION_COLUMNS}, count(t.id) as turn_count
+  const { rows } = await pool.query<
+    SessionRow & { turn_count: string; cost_usd: string | null }
+  >(
+    `select ${SESSION_COLUMNS},
+       (select count(*) from turns t where t.session_id = s.id) as turn_count,
+       (select sum(m.cost_usd) from model_requests m
+        where m.session_id = s.id) as cost_usd
      ${SESSION_FROM}
-     left join turns t on t.session_id = s.id
-     group by s.id, u.id, u.name, u.email
      order by s.started_at desc nulls last, s.created_at desc`,
   );
 
   return rows.map((row) => ({
     ...toSessionFields(row),
     turnCount: Number(row.turn_count),
+    costUsd: toCost(row.cost_usd),
   }));
 }
 
@@ -403,19 +447,79 @@ export async function getSession(
      order by turn_seq asc, id asc`,
     [sessionId],
   );
-  const turns = turnRows.rows.map((row) => ({
-    id: row.id,
-    parentTurnId: row.parent_turn_id,
-    prompt: row.prompt,
-    response: row.response,
-    startedAt: toIso(row.started_at),
-    endedAt: toIso(row.ended_at),
-  }));
+
+  const requestRows = await pool.query<{
+    id: string;
+    turn_id: string;
+    provider: string;
+    model: string;
+    input_tokens: number | null;
+    output_tokens: number | null;
+    latency_ms: number | null;
+    cost_usd: string | null;
+  }>(
+    `select id, turn_id, provider, model,
+            input_tokens, output_tokens, latency_ms, cost_usd
+     from model_requests
+     where session_id = $1
+     order by event_seq asc`,
+    [sessionId],
+  );
+  const requestsByTurn = new Map<string, ModelRequest[]>();
+  for (const row of requestRows.rows) {
+    const requests = requestsByTurn.get(row.turn_id) ?? [];
+    requests.push({
+      id: row.id,
+      provider: row.provider,
+      model: row.model,
+      inputTokens: row.input_tokens,
+      outputTokens: row.output_tokens,
+      latencyMs: row.latency_ms,
+      costUsd: toCost(row.cost_usd),
+    });
+    requestsByTurn.set(row.turn_id, requests);
+  }
+
+  // Sum in Postgres, where `numeric` is exact, rather than in floating point.
+  const turnCostRows = await pool.query<{
+    turn_id: string;
+    cost_usd: string | null;
+  }>(
+    `select turn_id, sum(cost_usd) as cost_usd
+     from model_requests
+     where session_id = $1
+     group by turn_id`,
+    [sessionId],
+  );
+  const turnCost = new Map(
+    turnCostRows.rows.map((row) => [row.turn_id, row.cost_usd]),
+  );
+
+  const turns = turnRows.rows.map((row) => {
+    const modelRequests = requestsByTurn.get(row.id) ?? [];
+    return {
+      id: row.id,
+      parentTurnId: row.parent_turn_id,
+      prompt: row.prompt,
+      response: row.response,
+      startedAt: toIso(row.started_at),
+      endedAt: toIso(row.ended_at),
+      costUsd: toCost(turnCost.get(row.id) ?? null),
+      modelRequests,
+    };
+  });
+
+  const sessionCostRows = await pool.query<{ cost_usd: string | null }>(
+    "select sum(cost_usd) as cost_usd from model_requests where session_id = $1",
+    [sessionId],
+  );
+  const costUsd = toCost(sessionCostRows.rows[0].cost_usd);
 
   return {
     ...toSessionFields(session),
     spawnedByTurnId: session.spawned_by_turn_id,
     turnCount: turns.length,
+    costUsd,
     turns,
   };
 }
@@ -456,4 +560,9 @@ export async function sessionExists(
 
 function toIso(value: Date | null): string | null {
   return value ? value.toISOString() : null;
+}
+
+/** Parse a Postgres `numeric` cost, which the driver returns as a string. */
+function toCost(value: string | null): number | null {
+  return value === null ? null : Number(value);
 }

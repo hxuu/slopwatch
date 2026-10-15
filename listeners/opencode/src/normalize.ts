@@ -179,12 +179,19 @@ export class Normalizer {
   ): NormalEvent[] {
     const sessionId = this.requireSessionId(event);
     if (!sessionId) return [];
-    const { assistantMessageID, tokens } = event.data;
+    const { assistantMessageID, tokens, cost } = event.data;
     const state = this.state(sessionId, this.options.agentVersion);
 
     return [
       ...this.ensureTurn(state, event, sessionId, assistantMessageID),
-      this.modelRequest(state, event, sessionId, assistantMessageID, tokens),
+      this.modelRequest(
+        state,
+        event,
+        sessionId,
+        assistantMessageID,
+        tokens,
+        cost,
+      ),
     ];
   }
 
@@ -193,15 +200,22 @@ export class Normalizer {
   ): NormalEvent[] {
     const sessionId = this.requireSessionId(event);
     if (!sessionId) return [];
-    const { assistantMessageID, tokens } = event.data;
+    const { assistantMessageID, tokens, cost } = event.data;
     const state = this.state(sessionId, this.options.agentVersion);
 
     return [
       ...this.ensureTurn(state, event, sessionId, assistantMessageID),
-      this.modelRequest(state, event, sessionId, assistantMessageID, {
-        input: tokens?.input ?? 0,
-        output: tokens?.output ?? 0,
-      }),
+      this.modelRequest(
+        state,
+        event,
+        sessionId,
+        assistantMessageID,
+        {
+          input: tokens?.input ?? 0,
+          output: tokens?.output ?? 0,
+        },
+        cost,
+      ),
     ];
   }
 
@@ -381,6 +395,7 @@ export class Normalizer {
     sessionId: string,
     assistantMessageId: string,
     tokens: { input: number; output: number },
+    costUsd?: number,
   ): NormalEvent {
     const model = state.models.get(assistantMessageId);
     if (!model) {
@@ -400,6 +415,7 @@ export class Normalizer {
       ...(model && model.startedAt > 0
         ? { latencyMs: Math.max(0, event.created - model.startedAt) }
         : {}),
+      ...(costUsd !== undefined ? { costUsd } : {}),
     };
   }
 

@@ -51,10 +51,30 @@ export function isNormalEvent(value: unknown): value is NormalEvent {
   if (TURN_SCOPED.has(event.kind as NormalEvent["kind"])) {
     if (!isNonEmptyString(event.turnId)) return false;
   }
+  if (event.kind === "model.request") {
+    if (!isNonEmptyString(event.provider)) return false;
+    if (!isNonEmptyString(event.model)) return false;
+    if (!isCount(event.inputTokens) || !isCount(event.outputTokens)) {
+      return false;
+    }
+    if (event.latencyMs !== undefined && !isCount(event.latencyMs))
+      return false;
+    if (event.costUsd !== undefined && !isCost(event.costUsd)) return false;
+  }
 
   return true;
 }
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
+}
+
+/** A non-negative integer, as token counts and latencies must be. */
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+/** A finite, non-negative dollar amount. */
+function isCost(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }

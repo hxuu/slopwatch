@@ -79,6 +79,7 @@ describeServer("capturing a Session with the OpenCode Listener", (server) => {
           model?: string;
           inputTokens?: number;
           outputTokens?: number;
+          costUsd?: number;
         };
       }>;
     };
@@ -100,6 +101,7 @@ describeServer("capturing a Session with the OpenCode Listener", (server) => {
     expect(modelRequest?.model).toBe("claude-sonnet-4-5");
     expect(modelRequest?.inputTokens).toBe(1_200);
     expect(modelRequest?.outputTokens).toBe(80);
+    expect(modelRequest?.costUsd).toBe(0.02);
   });
 
   test("a real Session then appears in the dashboard", async () => {
