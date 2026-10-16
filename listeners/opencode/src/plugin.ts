@@ -36,6 +36,8 @@ export interface ListenerConfig {
   token?: string;
   batchSize?: number;
   flushIntervalMs?: number;
+  /** How many Events the offline spool holds before it evicts the oldest. */
+  spoolCap?: number;
 }
 
 /** A started Listener, with a handle onto its subscription loop. */
@@ -84,6 +86,7 @@ export async function setupListener(
     directory: ctx.location.directory,
     batchSize: config.batchSize,
     flushIntervalMs: config.flushIntervalMs,
+    spoolCap: config.spoolCap,
     report,
   });
 

@@ -24,3 +24,8 @@ export function describeEvent(event: unknown): string {
   }
   return "unknown";
 }
+
+/** Format a count of Events for a report, e.g. `1 Event` or `3 Events`. */
+export function eventCount(count: number): string {
+  return `${count} ${count === 1 ? "Event" : "Events"}`;
+}
