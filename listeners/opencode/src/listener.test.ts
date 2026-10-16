@@ -3,6 +3,7 @@ import { describeServer } from "@slopwatch/server/test/harness";
 import { createListener } from "./listener";
 import {
   DELEGATING_SESSION_ID,
+  DRIFTED_EVENT_TYPE,
   PROMPT,
   RESPONSE,
   SESSION_ID,
@@ -10,6 +11,7 @@ import {
   SUBAGENT_SESSION_ID,
   delegatingSession,
   driftedEvent,
+  driftedSession,
   recordedSession,
   subagentSession,
 } from "./test/fixtures";
@@ -156,6 +158,30 @@ describeServer("capturing a Session with the OpenCode Listener", (server) => {
       await fetch(`${server().url}/api/sessions`)
     ).json()) as unknown[];
     expect(sessions).toEqual([]);
+  });
+
+  test("an unrecognized session event is reported loudly, not swallowed", async () => {
+    const reported: string[] = [];
+    const capture = listener((message) => reported.push(message));
+
+    for (const event of driftedSession) capture.handleEvent(event);
+    await capture.stop();
+
+    // The renamed Turn-closing Event is the drift: it is reported, not swallowed.
+    expect(reported).toHaveLength(1);
+    expect(reported[0]).toContain(DRIFTED_EVENT_TYPE);
+
+    // The Turn's Events still reached the Server, so what is missing is the
+    // reported Turn-closing Event, not an invisible gap in the Session.
+    const stored = (await (
+      await fetch(
+        `${server().url}/api/sessions/${SESSION_ID}/events?since_seq=0`,
+      )
+    ).json()) as { events: Array<{ event: { kind: string } }> };
+    const kinds = stored.events.map((entry) => entry.event.kind);
+    expect(kinds).toContain("turn.started");
+    expect(kinds).toContain("session.ended");
+    expect(kinds).not.toContain("turn.ended");
   });
 
   test("a failing Server is reported rather than thrown at the caller", async () => {

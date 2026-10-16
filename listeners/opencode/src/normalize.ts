@@ -59,6 +59,57 @@ const AGENT = "opencode";
  */
 const SUBAGENT_TOOL = "task";
 
+/**
+ * The `session.*` OpenCode events Slopwatch recognizes but deliberately does not
+ * model. Any other event in the `session.` namespace is unrecognized: OpenCode
+ * has renamed or added a Session or Turn event, and swallowing it could drop a
+ * Turn without a trace.
+ *
+ * The set is pinned to OpenCode 2.0.26. Drift reports itself the first time an
+ * unrecognized Session event fires, which is the point; events outside the
+ * `session.` namespace (tui, pty, shell, and so on) never carry Turn semantics
+ * and stay silent.
+ */
+const IGNORED_SESSION_EVENTS = new Set<string>([
+  "session.agent.selected",
+  "session.compaction.delta",
+  "session.compaction.ended",
+  "session.compaction.failed",
+  "session.compaction.started",
+  "session.execution.started",
+  "session.forked",
+  "session.idle",
+  "session.inbox.cancelled",
+  "session.inbox.delivered",
+  "session.inbox.delivery.changed",
+  "session.instructions.updated",
+  "session.metadata.updated",
+  "session.model.selected",
+  "session.moved",
+  "session.permissions",
+  "session.reasoning.delta",
+  "session.reasoning.ended",
+  "session.reasoning.started",
+  "session.renamed",
+  "session.retry.scheduled",
+  "session.revert.cleared",
+  "session.revert.committed",
+  "session.revert.staged",
+  "session.shell.ended",
+  "session.shell.started",
+  "session.skill.activated",
+  "session.status",
+  "session.step.streamed",
+  "session.synthetic",
+  "session.text.delta",
+  "session.text.started",
+  "session.tool.input.delta",
+  "session.tool.input.ended",
+  "session.tool.progress",
+  "session.usage.updated",
+  "session.viewed",
+]);
+
 export class Normalizer {
   private readonly sessions = new Map<string, SessionState>();
 
@@ -107,7 +158,17 @@ export class Normalizer {
         return this.executionEnded(event);
       default:
         // OpenCode dispatches dozens of event types Slopwatch does not model
-        // (tui, pty, shell, filesystem). Silence here is deliberate.
+        // (tui, pty, shell, filesystem) and deliberately ignores. A `session.*`
+        // event outside the recognized set is different: it is drift, and it may
+        // be the event that would have closed a Turn, so it is reported rather
+        // than swallowed.
+        if (isUnrecognizedSessionEvent(event)) {
+          this.options.report(
+            `unrecognized OpenCode session event "${event.type}"; ` +
+              `OpenCode's schema may have drifted, and this can drop a Turn`,
+            event,
+          );
+        }
         return [];
     }
   }
@@ -516,4 +577,15 @@ export class Normalizer {
 
 function nonBlank(value: string | undefined): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/**
+ * Whether an event that reached the `dispatch` default is drift: a `session.*`
+ * event the Listener neither handles nor recognizes. Events in other namespaces
+ * (tui, pty, shell, filesystem) are out of scope rather than drift.
+ */
+function isUnrecognizedSessionEvent(event: OpenCodeEvent): boolean {
+  return (
+    event.type.startsWith("session.") && !IGNORED_SESSION_EVENTS.has(event.type)
+  );
 }
