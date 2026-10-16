@@ -4,7 +4,7 @@
 [![Runtime: Bun](https://img.shields.io/badge/runtime-bun-black?logo=bun)](https://bun.sh)
 
 Self-hosted, on-prem observability for coding agents. Slopwatch observes the
-Sessions a developer runs in Claude Code, Codex, Pi, OpenCode, and Copilot, ships
+Sessions a user runs in Claude Code, Codex, Pi, OpenCode, and Copilot, ships
 them to a Server you operate, and turns them into answers about who spent what,
 on which model, across which Turns.
 
@@ -22,7 +22,7 @@ dashboard.
 ## How it works
 
 ```
- Developer machine                        Org-operated, self-hosted
+ User machine                             Org-operated, self-hosted
  ┌──────────────────────────────┐         ┌──────────────────────────────┐
  │ Coding agent                 │         │ slopwatch-server             │
  │ (Claude Code, Codex, Pi,     │         │ (single binary)              │
@@ -44,7 +44,7 @@ dashboard.
 
 Two components do the work:
 
-- **Listener** - a per-agent integration on the developer's machine that observes
+- **Listener** - a per-agent integration on the user's machine that observes
   one coding agent, normalizes its events into `NormalEvent`, and ships them to
   the Server. One Listener per supported agent; it runs either in-process (Pi,
   OpenCode) or as a per-session subprocess (Claude Code, Codex, Copilot).
@@ -147,7 +147,7 @@ curl -X POST http://localhost:3000/api/admin/users \
 
 > [!WARNING]
 > The Server stores only a hash of the token, so the response above is the only
-> time it is shown. Hand it to the developer out-of-band. Revoking it rejects
+> time it is shown. Hand it to the user out-of-band. Revoking it rejects
 > their next ingestion attempt.
 
 ### Load the OpenCode Listener
@@ -173,7 +173,7 @@ Point it at the Server and the minted token, either as plugin options (`url` /
 | OS keychain / file | `token`         | Where `slopwatch login` (later ticket) puts it. |
 
 With no token the Listener reports itself inactive and does nothing, so a
-developer without Slopwatch is left undisturbed.
+user without Slopwatch is left undisturbed.
 
 > [!TIP]
 > `bun run pg:up` starts the same Postgres the tests use, so there is no second
@@ -234,3 +234,10 @@ admin API require `Authorization: Bearer ...`.
   capture surfaces across the five target agents.
 - [research/developer-leaderboard-design.md](./research/developer-leaderboard-design.md) -
   the dashboard's top-level "who is spending" surface.
+
+## Credits
+
+Slopwatch's architecture was thought through by
+[Matt Pocock](https://www.youtube.com/watch?v=K-mA3MZ_EzU), whose original
+walkthrough shaped the Listener/Server split, the `NormalEvent` schema, and the
+on-prem, org-wide model.
