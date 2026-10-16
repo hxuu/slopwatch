@@ -294,6 +294,25 @@ export const subagentSession: OpenCodeEvent[] = [
 ];
 
 /**
+ * The `type` OpenCode renamed the Turn-closing `session.execution.succeeded` to.
+ * A renamed Session event is the drift that would silently drop a Turn if the
+ * Listener swallowed unrecognized event types.
+ */
+export const DRIFTED_EVENT_TYPE = "session.execution.completed";
+
+const renamedExecution = {
+  ...executionSucceeded,
+  type: DRIFTED_EVENT_TYPE,
+} as unknown as OpenCodeEvent;
+
+/** `recordedSession` with its Turn-closing Event renamed by schema drift. */
+export const driftedSession: OpenCodeEvent[] = [
+  ...recordedSession.slice(0, -2),
+  renamedExecution,
+  deleted,
+];
+
+/**
  * A `session.created` whose payload no longer carries `data.sessionID`: the
  * shape OpenCode would hand a Listener after a schema drift. Cast because the
  * whole point is that it no longer matches the declared type.

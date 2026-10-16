@@ -63,6 +63,8 @@ export interface SessionDetail extends SessionSummary {
 /** An Event as stored, carrying the per-Session sequence it was assigned. */
 export interface StoredEvent {
   seq: number;
+  /** The original agent payload, retained unmodified alongside the Event. */
+  raw: unknown;
   event: NormalEvent;
 }
 
@@ -605,15 +607,20 @@ export async function listEventsSince(
 ): Promise<StoredEvent[]> {
   const { rows } = await pool.query<{
     event_seq: number;
+    raw: unknown;
     event: NormalEvent;
   }>(
-    `select event_seq, event
+    `select event_seq, raw, event
      from events
      where session_id = $1 and event_seq > $2
      order by event_seq asc`,
     [sessionId, sinceSeq],
   );
-  return rows.map((row) => ({ seq: row.event_seq, event: row.event }));
+  return rows.map((row) => ({
+    seq: row.event_seq,
+    raw: row.raw,
+    event: row.event,
+  }));
 }
 
 /** Whether a Session exists, without loading it. */
