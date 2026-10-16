@@ -280,6 +280,8 @@ describeServer("leaderboard, rollups, and spend by agent", (server) => {
     expect(body).toContain("Alice");
     expect(body).toContain("Bob");
     expect(body.indexOf("Bob")).toBeLessThan(body.indexOf("Alice"));
+    // A leaderboard row links to that User's Sessions.
+    expect(body).toContain(`/users/${alice.id}`);
   });
 
   test("renders the spend-by-agent breakdown as a page", async () => {

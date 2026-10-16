@@ -165,14 +165,6 @@ export async function issueToken(pool: Pool, userId: string): Promise<string> {
   return token;
 }
 
-/** Whether a User with this id exists. */
-export async function userExists(pool: Pool, userId: string): Promise<boolean> {
-  const { rowCount } = await pool.query("select 1 from users where id = $1", [
-    userId,
-  ]);
-  return (rowCount ?? 0) > 0;
-}
-
 /**
  * Revoke every active token a User holds, so their next ingestion attempt is
  * rejected.
@@ -462,15 +454,79 @@ function toSessionSummary(row: SessionSummaryRow): SessionSummary {
   };
 }
 
+/** Read one User by id, or null when there is no such User. */
+export async function getUser(
+  pool: Pool,
+  userId: string,
+): Promise<User | null> {
+  const { rows } = await pool.query<User>(
+    "select id, name, email from users where id = $1",
+    [userId],
+  );
+  return rows[0] ?? null;
+}
+
+/** Newest first, for the org-wide and per-User Session lists. */
+const SESSION_ORDER_DESC = `s.started_at desc nulls last, s.created_at desc`;
+/** Oldest first, for the Subagents a Session spawned. */
+const SESSION_ORDER_ASC = `s.started_at asc nulls last, s.created_at asc`;
+
 /** List every Session, newest first, with its Turn count and cost. */
 export async function listSessions(pool: Pool): Promise<SessionSummary[]> {
-  const { rows } = await pool.query<SessionSummaryRow>(
-    `select ${SESSION_COLUMNS}, ${SESSION_AGGREGATES}
-     ${SESSION_FROM}
-     order by s.started_at desc nulls last, s.created_at desc`,
+  return listSessionSummaries(pool, "true", SESSION_ORDER_DESC);
+}
+
+/** Sessions owned by a User, newest first. */
+export async function listSessionsByUser(
+  pool: Pool,
+  userId: string,
+): Promise<SessionSummary[]> {
+  return listSessionSummaries(pool, "s.user_id = $1", SESSION_ORDER_DESC, [
+    userId,
+  ]);
+}
+
+/**
+ * Sessions matching a search query, by Session id, cwd, or coding agent. The
+ * query is a case-insensitive substring, so an id fragment, a directory, or an
+ * agent name each reach the Session directly.
+ */
+export async function searchSessions(
+  pool: Pool,
+  query: string,
+): Promise<SessionSummary[]> {
+  return listSessionSummaries(
+    pool,
+    `s.id ilike $1 escape '\\'
+       or s.cwd ilike $1 escape '\\'
+       or s.agent ilike $1 escape '\\'`,
+    SESSION_ORDER_DESC,
+    [likePattern(query)],
+  );
+}
+
+/** Users matching a search query, by name or email, case-insensitively. */
+export async function searchUsers(pool: Pool, query: string): Promise<User[]> {
+  const { rows } = await pool.query<User>(
+    `select id, name, email from users
+     where name ilike $1 escape '\\' or email ilike $1 escape '\\'
+     order by name asc, email asc`,
+    [likePattern(query)],
   );
 
-  return rows.map(toSessionSummary);
+  return rows;
+}
+
+/**
+ * `query` as a case-insensitive substring pattern. LIKE metacharacters are
+ * escaped so a query of `%` matches a literal percent rather than everything.
+ */
+function likePattern(query: string): string {
+  const escaped = query
+    .replaceAll("\\", "\\\\")
+    .replaceAll("%", "\\%")
+    .replaceAll("_", "\\_");
+  return `%${escaped}%`;
 }
 
 /** Sessions spawned as Subagents by a Turn in `parentSessionId`. */
@@ -478,12 +534,31 @@ async function listChildSessions(
   pool: Pool,
   parentSessionId: string,
 ): Promise<SessionSummary[]> {
+  return listSessionSummaries(
+    pool,
+    "s.parent_session_id = $1",
+    SESSION_ORDER_ASC,
+    [parentSessionId],
+  );
+}
+
+/**
+ * Sessions projected as summaries, filtered by `where` and ordered by `order`.
+ * Every Session reader shares this projection, its Turn-count and cost
+ * aggregates, and the row-to-summary mapping.
+ */
+async function listSessionSummaries(
+  pool: Pool,
+  where: string,
+  order: string,
+  params: unknown[] = [],
+): Promise<SessionSummary[]> {
   const { rows } = await pool.query<SessionSummaryRow>(
     `select ${SESSION_COLUMNS}, ${SESSION_AGGREGATES}
      ${SESSION_FROM}
-     where s.parent_session_id = $1
-     order by s.started_at asc nulls last, s.created_at asc`,
-    [parentSessionId],
+     where ${where}
+     order by ${order}`,
+    params,
   );
 
   return rows.map(toSessionSummary);
