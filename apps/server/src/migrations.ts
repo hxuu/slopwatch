@@ -98,4 +98,35 @@ export const migrations: Migration[] = [
         on model_requests (session_id, event_seq);
     `,
   },
+  {
+    id: "0003_rollups",
+    sql: `
+      -- A per-User, per-day cache of what the Model requests that day add up to.
+      -- Recomputable from model_requests, so it is a cache, not a second source
+      -- of truth. spend_usd is null when every Model request that day reported
+      -- no Cost, and otherwise the sum of the costs that were reported.
+      -- The counts are distinct Sessions, distinct Turns, and Model requests
+      -- among the day's Model requests.
+      create table user_daily_rollup (
+        user_id uuid not null references users(id) on delete cascade,
+        day date not null,
+        spend_usd numeric(14, 6),
+        session_count integer not null default 0,
+        turn_count integer not null default 0,
+        request_count integer not null default 0,
+        top_agent text,
+        primary key (user_id, day)
+      );
+
+      -- A per-User, per-hour cache, the 24 points of a User's daily sparkline.
+      -- hour is the UTC wall clock the Model requests landed in.
+      create table user_hourly_rollup (
+        user_id uuid not null references users(id) on delete cascade,
+        hour timestamp not null,
+        spend_usd numeric(14, 6),
+        request_count integer not null default 0,
+        primary key (user_id, hour)
+      );
+    `,
+  },
 ];

@@ -1,6 +1,7 @@
 import type { SessionDetail, SessionSummary, Turn } from "./db";
 import { escapeHtml } from "./html";
 import { renderLiveEvents } from "./live";
+import type { AgentSpend, LeaderboardRow } from "./rollups";
 
 /** The dashboard's Sessions index: every Session, newest first. */
 export function renderSessionList(sessions: SessionSummary[]): string {
@@ -95,6 +96,139 @@ function formatUsd(costUsd: number | null): string {
 }
 
 /**
+ * The Developer leaderboard: one row per User, ranked by the day's spend
+ * descending, each with its counts, top coding agent, 7-day delta, and an
+ * hourly sparkline. `date` names the day the ranking is scoped to.
+ */
+export function renderLeaderboard(
+  rows: LeaderboardRow[],
+  date: string,
+): string {
+  const topSpend = Math.max(0, ...rows.map((row) => row.spendUsd ?? 0));
+  const tableRows = rows
+    .map((row, index) => {
+      return `
+      <tr>
+        <td class="rank">${String(index + 1).padStart(2, "0")}</td>
+        <td>${escapeHtml(row.user.name)}<span class="muted"> · ${escapeHtml(row.user.email)}</span></td>
+        <td class="num">${formatUsd(row.spendUsd)}</td>
+        ${renderShare(row.spendUsd, topSpend)}
+        <td class="num">${row.sessionCount}</td>
+        <td class="num">${row.turnCount}</td>
+        <td class="num">${row.requestCount}</td>
+        <td>${row.topAgent === null ? '<span class="muted">none</span>' : `<span class="chip">${escapeHtml(row.topAgent)}</span>`}</td>
+        <td class="num ${deltaClass(row.delta7d)}">${formatDelta(row.delta7d)}</td>
+        <td>${renderSparkline(row.hourlySpend)}</td>
+      </tr>`;
+    })
+    .join("");
+
+  const body =
+    rows.length === 0
+      ? emptySpend(date)
+      : `<table class="leaderboard">
+        <thead>
+          <tr>
+            <th>#</th><th>Developer</th><th>Spend</th><th>Share</th>
+            <th>Sessions</th><th>Turns</th><th>Requests</th>
+            <th>Top coding agent</th><th>7d Δ</th><th>Today</th>
+          </tr>
+        </thead>
+        <tbody>${tableRows}</tbody>
+      </table>`;
+
+  return page(
+    "Leaderboard",
+    `<h1>Leaderboard</h1><p class="muted">Ranked by spend on ${escapeHtml(date)}.</p>${body}`,
+  );
+}
+
+/** The org-level spend-per-coding-agent breakdown for one day. */
+export function renderSpendByAgent(agents: AgentSpend[], date: string): string {
+  const total = agents.reduce((sum, agent) => sum + (agent.spendUsd ?? 0), 0);
+  const tableRows = agents
+    .map((agent) => {
+      const share = percentOf(agent.spendUsd, total);
+      return `
+      <tr>
+        <td><span class="chip">${escapeHtml(agent.agent)}</span></td>
+        <td class="num">${formatUsd(agent.spendUsd)}</td>
+        ${renderShare(agent.spendUsd, total)}
+        <td class="num">${share}%</td>
+        <td class="num">${agent.requestCount}</td>
+      </tr>`;
+    })
+    .join("");
+
+  const body =
+    agents.length === 0
+      ? emptySpend(date)
+      : `<table class="agents">
+        <thead>
+          <tr><th>Coding agent</th><th>Spend</th><th>Share</th><th>%</th><th>Model requests</th></tr>
+        </thead>
+        <tbody>${tableRows}</tbody>
+      </table>`;
+
+  return page(
+    "Spend by coding agent",
+    `<h1>Spend by coding agent</h1><p class="muted">Org spend on ${escapeHtml(date)}.</p>${body}`,
+  );
+}
+
+/** A share bar, normalized to `max`, so the top row is always a full bar. */
+function renderShare(spendUsd: number | null, max: number): string {
+  const share = percentOf(spendUsd, max);
+  return `<td class="share"><span class="bar" style="width:${share}%"></span></td>`;
+}
+
+/** `spend` as a whole-number percentage of `max`, or 0 when `max` is unknown. */
+function percentOf(spend: number | null, max: number): number {
+  if (max <= 0) return 0;
+  return Math.round(((spend ?? 0) / max) * 100);
+}
+
+function emptySpend(date: string): string {
+  return `<p class="empty">No spend on ${escapeHtml(date)}.</p>`;
+}
+
+/** A signed percentage for the 7-day delta, or `unknown`. */
+function formatDelta(delta: number | null): string {
+  if (delta === null) return "unknown";
+  const sign = delta >= 0 ? "+" : "";
+  return `${sign}${(delta * 100).toFixed(1)}%`;
+}
+
+function deltaClass(delta: number | null): string {
+  if (delta === null) return "muted";
+  return delta >= 0 ? "up" : "down";
+}
+
+/**
+ * A 24-point hourly spend sparkline. Bars are scaled to the day's peak; an hour
+ * whose spend is unknown renders as a muted, full-width marker rather than a
+ * zero, so unknown is never drawn as free.
+ */
+function renderSparkline(points: (number | null)[]): string {
+  const slot = 5;
+  const bar = 4;
+  const height = 24;
+  const max = Math.max(0, ...points.map((point) => point ?? 0));
+  const bars = points
+    .map((point, hour) => {
+      const x = hour * slot;
+      if (point === null) {
+        return `<rect class="unknown" x="${x}" y="0" width="${bar}" height="${height}" />`;
+      }
+      const barHeight = max > 0 ? Math.round((point / max) * height) : 0;
+      return `<rect x="${x}" y="${height - barHeight}" width="${bar}" height="${barHeight}" />`;
+    })
+    .join("");
+  const width = points.length * slot - (slot - bar);
+  return `<svg class="spark" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="hourly spend"><title>Hourly spend</title>${bars}</svg>`;
+}
+
+/**
  * Render a Session's Turns as a tree. Turns arrive in Session order, each naming
  * its parent, so the View rebuilds the DAG the Listener shipped rather than
  * flattening it; a linear Session falls out as a straight chain for free.
@@ -169,9 +303,24 @@ function page(title: string, body: string): string {
       ol.events .kind { font-family: ui-monospace, monospace; }
       ol.events .summary { overflow-wrap: anywhere; }
       h4 { margin: 0.6rem 0 0.3rem; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.7; }
+      nav.site { display: flex; gap: 1rem; margin-bottom: 1.5rem; padding-bottom: 0.5rem; border-bottom: 1px solid #8884; }
+      nav.site a { text-decoration: none; }
+      th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.07em; opacity: 0.7; }
+      .rank { font-variant-numeric: tabular-nums; opacity: 0.7; }
+      .chip { font-family: ui-monospace, monospace; background: #8881; border-radius: 999px; padding: 0.1rem 0.5rem; font-size: 0.85em; }
+      .share { width: 8rem; }
+      .share .bar { display: block; height: 0.6rem; background: currentColor; opacity: 0.5; border-radius: 2px; }
+      .up { color: #1a7f37; }
+      .down { color: #cf222e; }
+      svg.spark { display: block; }
+      svg.spark rect { fill: currentColor; opacity: 0.7; }
+      svg.spark rect.unknown { opacity: 0.15; }
     </style>
   </head>
-  <body>${body}</body>
+  <body>
+    <nav class="site"><a href="/">Sessions</a><a href="/leaderboard">Leaderboard</a><a href="/spend-by-agent">Spend by coding agent</a></nav>
+    ${body}
+  </body>
 </html>
 `;
 }

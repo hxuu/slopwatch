@@ -1,9 +1,15 @@
 import type { NormalEvent } from "@slopwatch/events";
 import type { Pool } from "pg";
 import { tokensMatch } from "./auth";
-import { renderSessionDetail, renderSessionList } from "./dashboard";
+import {
+  renderLeaderboard,
+  renderSessionDetail,
+  renderSessionList,
+  renderSpendByAgent,
+} from "./dashboard";
 import * as db from "./db";
 import { createPool, migrate } from "./db";
+import { leaderboard, spendByAgent, utcToday } from "./rollups";
 import { isNormalEvent } from "./validate";
 
 export interface ServerOptions {
@@ -88,6 +94,14 @@ async function route(
       return Response.json(await db.listSessions(pool));
     }
 
+    if (request.method === "GET" && pathname === "/api/leaderboard") {
+      return await readLeaderboard(pool, url);
+    }
+
+    if (request.method === "GET" && pathname === "/api/spend-by-agent") {
+      return await readSpendByAgent(pool, url);
+    }
+
     const eventsMatch = /^\/api\/sessions\/([^/]+)\/events$/.exec(pathname);
     if (request.method === "GET" && eventsMatch) {
       return await readEvents(pool, decodeURIComponent(eventsMatch[1]), url);
@@ -100,6 +114,18 @@ async function route(
 
     if (request.method === "GET" && pathname === "/") {
       return html(renderSessionList(await db.listSessions(pool)));
+    }
+
+    if (request.method === "GET" && pathname === "/leaderboard") {
+      const day = dayParam(url);
+      if (day instanceof Response) return day;
+      return html(renderLeaderboard(await leaderboard(pool, day), day));
+    }
+
+    if (request.method === "GET" && pathname === "/spend-by-agent") {
+      const day = dayParam(url);
+      if (day instanceof Response) return day;
+      return html(renderSpendByAgent(await spendByAgent(pool, day), day));
     }
 
     const sessionPageMatch = /^\/sessions\/([^/]+)$/.exec(pathname);
@@ -263,6 +289,33 @@ async function readSession(pool: Pool, sessionId: string): Promise<Response> {
   return Response.json(session);
 }
 
+/** `GET /api/leaderboard?date=YYYY-MM-DD`: Users ranked by the day's spend. */
+async function readLeaderboard(pool: Pool, url: URL): Promise<Response> {
+  const day = dayParam(url);
+  if (day instanceof Response) return day;
+  return Response.json({ date: day, users: await leaderboard(pool, day) });
+}
+
+/** `GET /api/spend-by-agent?date=YYYY-MM-DD`: org spend per coding agent. */
+async function readSpendByAgent(pool: Pool, url: URL): Promise<Response> {
+  const day = dayParam(url);
+  if (day instanceof Response) return day;
+  return Response.json({ date: day, agents: await spendByAgent(pool, day) });
+}
+
+/**
+ * The day a windowed read is scoped to: the caller's `date`, or today in UTC.
+ * A malformed date is a 400 rather than a silent fallback to today.
+ */
+function dayParam(url: URL): string | Response {
+  const raw = url.searchParams.get("date");
+  if (raw === null) return utcToday();
+  if (!ISO_DAY_PATTERN.test(raw) || Number.isNaN(Date.parse(raw))) {
+    return badRequest("`date` must be an ISO date, e.g. 2026-10-15");
+  }
+  return raw;
+}
+
 /** `GET /api/health`: liveness, and a real round-trip to Postgres. */
 async function health(pool: Pool): Promise<Response> {
   try {
@@ -322,6 +375,8 @@ function isNonBlankString(value: unknown): value is string {
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const ISO_DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 function isUuid(value: string): boolean {
   return UUID_PATTERN.test(value);
