@@ -11,14 +11,30 @@ contract.
 
 ## Load it
 
-List the package in `opencode.json`:
+OpenCode v2 loads a configured plugin from a **directory** and resolves that
+directory to the package's `server` entrypoint. This package ships one
+(`server.ts`), so list the package directory and pass the Server URL and token as
+options:
 
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["@slopwatch/listener-opencode"],
+  "plugins": [
+    {
+      "package": "/absolute/path/to/slopwatch/listeners/opencode",
+      "options": {
+        "url": "http://localhost:3000",
+        "token": "<the token minted for the User>",
+      },
+    },
+  ],
 }
 ```
+
+Pointing at a file, such as `.../src/index.ts`, does not work: OpenCode skips the
+entry with `configured plugin path must be a directory` and nothing ships. The
+bare package name (`"@slopwatch/listener-opencode"`) needs a `"./server"` export
+alongside the root one, which arrives when the package is published.
 
 Configuration is read from plugin options, then the environment:
 
@@ -30,7 +46,22 @@ Configuration is read from plugin options, then the environment:
 | OS keychain / file | `token`         | Where `slopwatch login` (a later ticket) puts it. |
 
 With no token the Listener reports that it is inactive and does nothing, so a
-developer without Slopwatch is left undisturbed.
+user without Slopwatch is left undisturbed.
+
+### Verify it loaded
+
+OpenCode logs every plugin it loads. After restarting it, find the entrypoint:
+
+```sh
+grep "loading plugin" ~/.local/share/opencode/log/opencode.log | tail -1
+# msg="loading plugin" id=/absolute/path/to/slopwatch/listeners/opencode
+#   entrypoint=file:///absolute/path/to/slopwatch/listeners/opencode/server.ts
+```
+
+If that line is missing, or the log shows `configured plugin path must be a
+directory`, then `package` is not the package directory. Once it loads, send a
+prompt; the Session reaches the dashboard within a couple of seconds (Events
+batch for up to two).
 
 ## What it captures
 

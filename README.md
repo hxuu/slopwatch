@@ -150,34 +150,20 @@ curl -X POST http://localhost:3000/api/admin/users \
 > time it is shown. Hand it to the user out-of-band. Revoking it rejects
 > their next ingestion attempt.
 
-### Load the OpenCode Listener
+### Connect an agent
 
-The first Listener is an in-process OpenCode plugin. List the package in
-`opencode.json`:
+A Listener runs inside a coding agent on the user's machine and ships its
+Sessions to this Server. Each agent has its own setup doc, because the loading
+step and its caveats differ per agent.
 
-```jsonc
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugins": ["@slopwatch/listener-opencode"],
-}
-```
+| Agent    | Listener                       | Setup                                   |
+| -------- | ------------------------------ | --------------------------------------- |
+| OpenCode | `@slopwatch/listener-opencode` | [Set up OpenCode](./listeners/opencode) |
 
-Point it at the Server and the minted token, either as plugin options (`url` /
-`token`) or through the environment:
-
-| Source             | Key             | Meaning                                         |
-| ------------------ | --------------- | ----------------------------------------------- |
-| plugin options     | `url` / `token` | The Server base URL and the bearer token.       |
-| `SLOPWATCH_URL`    |                 | Defaults to `http://localhost:3000`.            |
-| `SLOPWATCH_TOKEN`  |                 | Overrides the stored token.                     |
-| OS keychain / file | `token`         | Where `slopwatch login` (later ticket) puts it. |
-
-With no token the Listener reports itself inactive and does nothing, so a
-user without Slopwatch is left undisturbed.
-
-> [!TIP]
-> `bun run pg:up` starts the same Postgres the tests use, so there is no second
-> instance to manage. Tear it down with `bun run pg:down`.
+Every Listener authenticates with the User token minted above (see
+[Add a User](#add-a-user)), passed as plugin options or through the environment.
+With no token a Listener reports itself inactive and does nothing, so a user
+without Slopwatch is left undisturbed.
 
 ## Development
 
