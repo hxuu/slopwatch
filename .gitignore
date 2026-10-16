@@ -2,3 +2,5 @@ node_modules
 dist
 *.log
 .DS_Store
+# Throwaway source tree the packaging test compiles an older release from.
+.older-release-*

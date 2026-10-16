@@ -21,6 +21,27 @@ SLOPWATCH_ADMIN_TOKEN=$(openssl rand -hex 16) \
 
 Migrations run on startup, tracked in `schema_migrations`.
 
+## Build and deploy
+
+`bun run build` compiles the whole Server into one executable at
+`dist/slopwatch`:
+
+```sh
+bun run build
+DATABASE_URL=postgres://user:pass@host/db ./dist/slopwatch
+```
+
+The binary bundles the HTTP API, the migrations, and the dashboard's HTML,
+CSS, and JavaScript, so there is no separate static-asset deploy and no second
+process to run. `DATABASE_URL` is the only thing it needs; `PORT` and
+`SLOPWATCH_ADMIN_TOKEN` are optional.
+
+Because migrations are compiled in and tracked in `schema_migrations`, a
+binary upgrade is drop-in: point the new binary at the same database and it
+applies only the migrations the previous release had not, leaving existing data
+in place. A Postgres advisory lock serialises replicas booting at once. See
+`src/packaging.test.ts` for the upgrade exercised end to end.
+
 ## HTTP API
 
 The dashboard is HTML at `/`; the JSON API lives under `/api`. Ingestion and the

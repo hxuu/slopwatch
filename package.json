@@ -8,6 +8,7 @@
     "spikes/*"
   ],
   "scripts": {
+    "build": "bun run --filter '@slopwatch/server' build",
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun run --filter '*' test",
     "format": "prettier --write .",
