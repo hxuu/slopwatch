@@ -1,10 +1,20 @@
-import type { SessionDetail, SessionSummary, Turn } from "./db";
+import type { SessionDetail, SessionSummary, Turn, User } from "./db";
 import { escapeHtml } from "./html";
 import { renderLiveEvents } from "./live";
 import type { AgentSpend, LeaderboardRow } from "./rollups";
 
 /** The dashboard's Sessions index: every Session, newest first. */
 export function renderSessionList(sessions: SessionSummary[]): string {
+  const body =
+    sessions.length === 0
+      ? `<p class="empty">No Sessions yet.</p>`
+      : sessionTable(sessions);
+
+  return page("Sessions", `<h1>Sessions</h1>${body}`);
+}
+
+/** A table of Sessions, linked by id and naming their owner and coding agent. */
+function sessionTable(sessions: SessionSummary[]): string {
   const rows = sessions
     .map(
       (session) => `
@@ -20,17 +30,75 @@ export function renderSessionList(sessions: SessionSummary[]): string {
     )
     .join("");
 
-  const body =
-    sessions.length === 0
-      ? `<p class="empty">No Sessions yet.</p>`
-      : `<table>
+  return `<table>
         <thead>
           <tr><th>Session</th><th>User</th><th>Coding agent</th><th>cwd</th><th>Status</th><th>Turns</th><th>Started</th></tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>`;
+}
 
-  return page("Sessions", `<h1>Sessions</h1>${body}`);
+/**
+ * The dashboard's search page: a search box, then matching Sessions and matching
+ * Users each under their own heading with a result count. An empty query shows
+ * the box alone; a query with no matches shows each category as empty rather
+ * than as an error.
+ */
+export function renderSearch(
+  query: string,
+  sessions: SessionSummary[],
+  users: User[],
+): string {
+  const body = query
+    ? `
+    <h2>Sessions <span class="count">${sessions.length}</span></h2>
+    ${sessions.length ? sessionTable(sessions) : `<p class="empty">No matching Sessions.</p>`}
+    <h2>Users <span class="count">${users.length}</span></h2>
+    ${users.length ? userTable(users) : `<p class="empty">No matching Users.</p>`}`
+    : `<p class="empty">Search Sessions by id, cwd, or coding agent, and Users by name or email.</p>`;
+
+  return page("Search", `<h1>Search</h1>${searchForm(query)}${body}`);
+}
+
+/** One User's page: their identity, then the Sessions they own. */
+export function renderUser(user: User, sessions: SessionSummary[]): string {
+  const body = `
+    <p><a href="/">&larr; All Sessions</a></p>
+    <h1>${escapeHtml(user.name)}</h1>
+    <p class="muted">${escapeHtml(user.email)}</p>
+    <h2>Sessions <span class="count">${sessions.length}</span></h2>
+    ${sessions.length ? sessionTable(sessions) : `<p class="empty">No Sessions from this User.</p>`}`;
+
+  return page(escapeHtml(user.name), body);
+}
+
+/** The search box, echoing the query the caller is looking at. */
+function searchForm(query: string): string {
+  return `
+    <form class="search" action="/search" method="get">
+      <input type="search" name="q" value="${escapeHtml(query)}" placeholder="Search Sessions and Users" />
+      <button type="submit">Search</button>
+    </form>`;
+}
+
+/** A table of Users, linked by id and naming their identity. */
+function userTable(users: User[]): string {
+  const rows = users
+    .map(
+      (user) => `
+      <tr>
+        <td><a href="/users/${escapeHtml(user.id)}">${escapeHtml(user.name)}</a></td>
+        <td class="muted">${escapeHtml(user.email)}</td>
+      </tr>`,
+    )
+    .join("");
+
+  return `<table class="users">
+        <thead>
+          <tr><th>User</th><th>Email</th></tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
 }
 
 /** The dashboard's Session detail: one Session's Turns as a tree, prompt and response. */
@@ -110,7 +178,7 @@ export function renderLeaderboard(
       return `
       <tr>
         <td class="rank">${String(index + 1).padStart(2, "0")}</td>
-        <td>${escapeHtml(row.user.name)}<span class="muted"> · ${escapeHtml(row.user.email)}</span></td>
+        <td><a href="/users/${escapeHtml(row.user.id)}">${escapeHtml(row.user.name)}</a><span class="muted"> · ${escapeHtml(row.user.email)}</span></td>
         <td class="num">${formatUsd(row.spendUsd)}</td>
         ${renderShare(row.spendUsd, topSpend)}
         <td class="num">${row.sessionCount}</td>
@@ -315,10 +383,13 @@ function page(title: string, body: string): string {
       svg.spark { display: block; }
       svg.spark rect { fill: currentColor; opacity: 0.7; }
       svg.spark rect.unknown { opacity: 0.15; }
+      form.search { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+      form.search input { flex: 1; font: inherit; padding: 0.35rem 0.6rem; }
+      .count { font-variant-numeric: tabular-nums; opacity: 0.6; font-weight: normal; }
     </style>
   </head>
   <body>
-    <nav class="site"><a href="/">Sessions</a><a href="/leaderboard">Leaderboard</a><a href="/spend-by-agent">Spend by coding agent</a></nav>
+    <nav class="site"><a href="/">Sessions</a><a href="/leaderboard">Leaderboard</a><a href="/spend-by-agent">Spend by coding agent</a><a href="/search">Search</a></nav>
     ${body}
   </body>
 </html>

@@ -3,9 +3,11 @@ import type { Pool } from "pg";
 import { tokensMatch } from "./auth";
 import {
   renderLeaderboard,
+  renderSearch,
   renderSessionDetail,
   renderSessionList,
   renderSpendByAgent,
+  renderUser,
 } from "./dashboard";
 import * as db from "./db";
 import { createPool, migrate } from "./db";
@@ -82,7 +84,7 @@ async function route(
         request,
         pool,
         adminToken,
-        decodeURIComponent(revokeMatch[1]),
+        decodeSegment(revokeMatch[1]),
       );
     }
 
@@ -92,6 +94,10 @@ async function route(
 
     if (request.method === "GET" && pathname === "/api/sessions") {
       return Response.json(await db.listSessions(pool));
+    }
+
+    if (request.method === "GET" && pathname === "/api/search") {
+      return await readSearch(pool, url);
     }
 
     if (request.method === "GET" && pathname === "/api/leaderboard") {
@@ -104,12 +110,12 @@ async function route(
 
     const eventsMatch = /^\/api\/sessions\/([^/]+)\/events$/.exec(pathname);
     if (request.method === "GET" && eventsMatch) {
-      return await readEvents(pool, decodeURIComponent(eventsMatch[1]), url);
+      return await readEvents(pool, decodeSegment(eventsMatch[1]), url);
     }
 
     const sessionMatch = /^\/api\/sessions\/([^/]+)$/.exec(pathname);
     if (request.method === "GET" && sessionMatch) {
-      return await readSession(pool, decodeURIComponent(sessionMatch[1]));
+      return await readSession(pool, decodeSegment(sessionMatch[1]));
     }
 
     if (request.method === "GET" && pathname === "/") {
@@ -128,11 +134,20 @@ async function route(
       return html(renderSpendByAgent(await spendByAgent(pool, day), day));
     }
 
+    if (request.method === "GET" && pathname === "/search") {
+      return await readSearchPage(pool, url);
+    }
+
+    const userPageMatch = /^\/users\/([^/]+)$/.exec(pathname);
+    if (request.method === "GET" && userPageMatch) {
+      return await readUser(pool, decodeSegment(userPageMatch[1]));
+    }
+
     const sessionPageMatch = /^\/sessions\/([^/]+)$/.exec(pathname);
     if (request.method === "GET" && sessionPageMatch) {
       const session = await db.getSession(
         pool,
-        decodeURIComponent(sessionPageMatch[1]),
+        decodeSegment(sessionPageMatch[1]),
       );
       if (!session) return notFound("session not found");
       return html(renderSessionDetail(session));
@@ -200,13 +215,12 @@ async function revokeUserToken(
   const denied = requireAdmin(request, adminToken);
   if (denied) return denied;
 
-  // A malformed User id names no User, so it is a 404 rather than a 500 from
-  // Postgres rejecting the value as a uuid.
-  if (!isUuid(userId) || !(await db.userExists(pool, userId))) {
+  const user = await findUser(pool, userId);
+  if (!user) {
     return notFound("User not found");
   }
 
-  await db.revokeUserTokens(pool, userId);
+  await db.revokeUserTokens(pool, user.id);
   return new Response(null, { status: 204 });
 }
 
@@ -301,6 +315,68 @@ async function readSpendByAgent(pool: Pool, url: URL): Promise<Response> {
   const day = dayParam(url);
   if (day instanceof Response) return day;
   return Response.json({ date: day, agents: await spendByAgent(pool, day) });
+}
+
+/**
+ * `GET /api/search?q=`: matching Sessions and Users, each with a result count.
+ * An empty query returns nothing rather than everything, and a query with no
+ * matches is an empty result rather than an error.
+ */
+async function readSearch(pool: Pool, url: URL): Promise<Response> {
+  const results = await searchResults(pool, searchQuery(url));
+  return Response.json({
+    sessions: { count: results.sessions.length, results: results.sessions },
+    users: { count: results.users.length, results: results.users },
+  });
+}
+
+/** `GET /search?q=`: the search page, results grouped and counted per category. */
+async function readSearchPage(pool: Pool, url: URL): Promise<Response> {
+  const query = searchQuery(url);
+  const results = await searchResults(pool, query);
+  return html(renderSearch(query, results.sessions, results.users));
+}
+
+/** `GET /users/:id`: one User's identity and the Sessions they own. */
+async function readUser(pool: Pool, userId: string): Promise<Response> {
+  const user = await findUser(pool, userId);
+  if (!user) return notFound("User not found");
+  return html(renderUser(user, await db.listSessionsByUser(pool, user.id)));
+}
+
+/**
+ * Read a User by id, treating a malformed id as naming no User so it is a 404
+ * rather than a 500 from Postgres rejecting the value as a uuid.
+ */
+async function findUser(pool: Pool, userId: string): Promise<db.User | null> {
+  return isUuid(userId) ? db.getUser(pool, userId) : null;
+}
+
+/** Decode one URL path segment, leaving it as-is when its encoding is malformed. */
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
+/** The trimmed search query, or an empty string when the caller sent none. */
+function searchQuery(url: URL): string {
+  return (url.searchParams.get("q") ?? "").trim();
+}
+
+/** Matching Sessions and Users for a query; both empty for a blank query. */
+async function searchResults(
+  pool: Pool,
+  query: string,
+): Promise<{ sessions: db.SessionSummary[]; users: db.User[] }> {
+  if (query === "") return { sessions: [], users: [] };
+  const [sessions, users] = await Promise.all([
+    db.searchSessions(pool, query),
+    db.searchUsers(pool, query),
+  ]);
+  return { sessions, users };
 }
 
 /**
